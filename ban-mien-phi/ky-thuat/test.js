@@ -8,9 +8,9 @@ const assert = require('assert');
 const SRC = fs.readFileSync(path.join(__dirname, '..', 'ZaloPlan.gs'), 'utf8');
 const HEAD = ['ID', 'Viec', 'NguoiLam', 'HanChot', 'UuTien', 'DuAn', 'TrangThai', 'TinGoc', 'NguoiGui', 'ChatID', 'TaoLuc', 'XongLuc', 'DaNhac'];
 
-function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 'sk-ant-test' } = {}) {
+function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 'sk-ant-test', configured = true } = {}) {
   const grid = [header.slice()];
-  const sent = [], zaloCalls = [], aiCalls = [], triggers = [];
+  const sent = [], zaloCalls = [], aiCalls = [], triggers = [], alerts = [], answers = [];
   const cache = new Map(), props = new Map();
   const clock = { now };
 
@@ -34,11 +34,19 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
     console: { log: () => {}, error: (e) => { ctx.__errors.push(String(e)); } },
     __errors: [],
     Date: class extends Date { static now() { return clock.now; } },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n) => (n === 'CongViec' ? sheet : null) }) },
+    SpreadsheetApp: {
+      getActiveSpreadsheet: () => ({ getSheetByName: (n) => (n === 'CongViec' ? sheet : null) }),
+      getUi: () => ({
+        ButtonSet: { OK: 'OK', OK_CANCEL: 'OK_CANCEL' }, Button: { OK: 'OK', CANCEL: 'CANCEL' },
+        prompt: (title) => { const a = answers.shift(); return { getSelectedButton: () => (a === null ? 'CANCEL' : 'OK'), getResponseText: () => a || '', title }; },
+        alert: (title, body) => alerts.push({ title, body }),
+        createMenu: (name) => { const m = { items: [], addItem: (l, f) => (m.items.push(f), m), addSeparator: () => m, addToUi: () => (ctx.__menu = { name, items: m.items }) }; return m; },
+      }),
+    },
     ScriptApp: {
       getProjectTriggers: () => triggers.slice(),
       deleteTrigger: (t) => triggers.splice(triggers.indexOf(t), 1),
-      newTrigger: (fn) => ({ timeBased: () => ({ everyMinutes: (m) => ({ create: () => triggers.push({ fn, m }) }) }) }),
+      newTrigger: (fn) => ({ timeBased: () => ({ everyMinutes: (m) => ({ create: () => triggers.push({ fn, m, getHandlerFunction: () => fn }) }) }) }),
     },
     CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) || null, put: (k, v) => cache.set(k, v), remove: (k) => cache.delete(k) }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) || null, setProperty: (k, v) => props.set(k, v) }) },
@@ -54,6 +62,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
           if (method === 'sendMessage') { sent.push(body); return resp(200, { ok: true, result: { message_id: 'x' } }); }
           if (method === 'getMe') return resp(200, token === 'TOKEN123' ? { ok: true, result: { id: 'b1', account_name: 'Bot ZaloPlan' } } : { ok: false, error_code: 401 });
           if (method === 'setWebhook') return resp(200, { ok: true, result: { url: body.url } });
+          if (method === 'getWebhookInfo') return resp(200, { ok: true, result: { url: 'https://script.google.com/macros/s/AKfy/exec?key=x', updated_at: 1 } });
         }
         if (url === 'https://api.anthropic.com/v1/messages') {
           aiCalls.push({ headers: o.headers, body });
@@ -67,7 +76,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
   };
   vm.createContext(ctx);
   vm.runInContext(SRC, ctx);
-  vm.runInContext(`Object.assign(CAU_HINH, ${JSON.stringify({ BOT_TOKEN: 'TOKEN123', KHOA_CLAUDE: claudeKey, MA_BI_MAT: 'BiMat1234567890ab', LINK_WEB_APP: 'https://script.google.com/macros/s/AKfy/exec', MO_HINH_AI: model })})`, ctx);
+  if (configured) Object.entries({ BOT_TOKEN: 'TOKEN123', KHOA_CLAUDE: claudeKey, MA_BI_MAT: 'BiMat1234567890ab', LINK_WEB_APP: 'https://script.google.com/macros/s/AKfy/exec', MO_HINH_AI: model }).forEach(([k, v]) => props.set(k, v));
 
   let msgId = 0;
   const zalo = (text, { key = 'BiMat1234567890ab', chat = 'chat-1', event = 'message.text.received', id } = {}) => {
@@ -77,7 +86,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
     return sent.slice(before);
   };
   const rows = () => grid.slice(1).map((v) => Object.fromEntries(HEAD.map((h, i) => [h, v[i] ?? ''])));
-  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows };
+  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows, alerts, answers };
 }
 
 // Thursday 2026-10-15 09:30 Vietnam time
@@ -85,15 +94,74 @@ const NOW = Date.UTC(2026, 9, 15, 2, 30);
 let n = 0;
 const t = (name, fn) => { fn(); n++; console.log('ok -', name); };
 
-t('caiDat refuses unfilled config', () => {
+t('menu is added on open', () => {
   const e = makeEnv({ now: NOW });
-  vm.runInContext("CAU_HINH.BOT_TOKEN = 'DIEN_BOT_TOKEN_ZALO'", e.ctx);
-  assert.throws(() => e.ctx.caiDat(), /chưa điền: BOT_TOKEN/);
+  e.ctx.onOpen();
+  assert.deepStrictEqual(e.ctx.__menu, { name: '🤖 ZaloPlan', items: ['menuCaiDat', 'menuKiemTra', 'menuAiTietKiem', 'menuAiManh'] });
+});
+t('menu setup: three answers, secret generated, everything connected', () => {
+  const e = makeEnv({ now: NOW, configured: false });
+  e.answers.push('TOKEN123', ' sk-ant-test ', 'https://script.google.com/macros/s/AKfy/exec');
+  e.ctx.menuCaiDat();
+  assert.strictEqual(e.alerts.length, 1);
+  assert.strictEqual(e.alerts[0].title, '✅ Cài đặt thành công', e.alerts[0].body);
+  assert.match(e.alerts[0].body, /Xong! Mở Zalo/);
+  const secret = e.props.get('MA_BI_MAT');
+  assert.match(secret, /^[A-Za-z0-9]{32}$/);
+  assert.strictEqual(e.props.get('KHOA_CLAUDE'), 'sk-ant-test', 'spaces trimmed');
+  const wh = e.zaloCalls.find((c) => c.method === 'setWebhook');
+  assert.strictEqual(wh.body.url, 'https://script.google.com/macros/s/AKfy/exec?key=' + secret);
+  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['moi15Phut', 15]]);
+  // running again with empty answers keeps values and the same secret, single trigger
+  e.answers.push('', '', '');
+  e.ctx.menuCaiDat();
+  assert.strictEqual(e.props.get('MA_BI_MAT'), secret);
+  assert.strictEqual(e.triggers.length, 1);
+  assert.strictEqual(e.alerts[1].title, '✅ Cài đặt thành công');
+  assert.strictEqual(e.zalo('hd', { key: secret }).length, 1, 'webhook accepts generated secret');
+});
+t('menu setup: cancel stops without saving', () => {
+  const e = makeEnv({ now: NOW, configured: false });
+  e.answers.push('TOKEN123', null);
+  e.ctx.menuCaiDat();
+  assert.strictEqual(e.alerts.length, 0);
+  assert.strictEqual(e.props.get('BOT_TOKEN'), undefined);
+});
+t('menu setup: wrong token / link explained in Vietnamese', () => {
+  let e = makeEnv({ now: NOW, configured: false });
+  e.answers.push('SAI', 'sk-ant-test', 'https://script.google.com/macros/s/AKfy/exec');
+  e.ctx.menuCaiDat();
+  assert.strictEqual(e.alerts[0].title, '⚠️ Chưa xong');
+  assert.match(e.alerts[0].body, /Token Zalo không đúng/);
+  e = makeEnv({ now: NOW, configured: false });
+  e.answers.push('TOKEN123', 'sk-ant-test', 'https://script.google.com/macros/s/AKfy/dev');
+  e.ctx.menuCaiDat();
+  assert.match(e.alerts[0].body, /Link ứng dụng web chưa đúng/);
+});
+t('model switch from menu takes effect immediately', () => {
+  const e = makeEnv({ now: NOW });
+  e.ctx.menuAiTietKiem();
+  e.zalo('Lan ơi gửi báo giá nhé');
+  assert.strictEqual(e.aiCalls[0].body.model, 'claude-haiku-5-5');
+  e.ctx.menuAiManh();
+  e.zalo('Lan ơi gửi báo giá nhé lần 2');
+  assert.strictEqual(e.aiCalls[1].body.model, 'claude-opus-5-5');
+});
+t('status check from menu', () => {
+  const e = makeEnv({ now: NOW });
+  e.ctx.menuKiemTra();
+  assert.match(e.alerts[0].body, /Token Zalo: đã có/);
+  assert.match(e.alerts[0].body, /Bot Zalo: hoạt động \(Bot ZaloPlan\)/);
+  assert.match(e.alerts[0].body, /Lịch chạy mỗi 15 phút: CHƯA BẬT/);
+});
+t('unconfigured bot ignores webhook calls', () => {
+  const e = makeEnv({ now: NOW, configured: false });
+  assert.strictEqual(e.zalo('hd', { key: '' }).length, 0);
 });
 t('caiDat creates trigger, checks token, sets webhook with key, tests Claude', () => {
   const e = makeEnv({ now: NOW });
   e.ctx.caiDat();
-  assert.deepStrictEqual(e.triggers, [{ fn: 'moi15Phut', m: 15 }]);
+  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['moi15Phut', 15]]);
   const wh = e.zaloCalls.find((c) => c.method === 'setWebhook');
   assert.strictEqual(wh.body.url, 'https://script.google.com/macros/s/AKfy/exec?key=BiMat1234567890ab');
   assert.strictEqual(wh.body.secret_token, 'BiMat1234567890ab');
@@ -102,8 +170,10 @@ t('caiDat creates trigger, checks token, sets webhook with key, tests Claude', (
   assert.strictEqual(e.triggers.length, 1);
 });
 t('caiDat reports a bad Claude key', () => {
-  const e = makeEnv({ now: NOW, claudeKey: 'sai' });
+  const e = makeEnv({ now: NOW, claudeKey: 'sk-ant-wrong' });
   assert.throws(() => e.ctx.caiDat(), /Khóa Claude có vấn đề/);
+  e.props.set('KHOA_CLAUDE', 'abc');
+  assert.throws(() => e.ctx.caiDat(), /phải bắt đầu bằng sk-ant-/);
 });
 t('caiDat reports wrong sheet header', () => {
   const e = makeEnv({ now: NOW, header: HEAD.slice(0, 12) });

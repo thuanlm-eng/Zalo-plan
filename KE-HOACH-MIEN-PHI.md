@@ -55,7 +55,7 @@ Bạn forward tin ─▶ Zalo Bot ─▶ Apps Script (trong Google Sheet) ─▶
 | 1 | Tạo bot Zalo, lấy token | ✅ Đã xong |
 | 2 | Tạo Google Sheet `CongViec` với 13 cột | ✅ Đã xong, giữ nguyên |
 | 3 | Vào **platform.claude.com**: kiểm tra số dư credit ở **Billing**, đặt **Limits**, tạo **API Key**. **Không cần nạp thêm tiền** | |
-| 4 | Trong Google Sheet: **Tiện ích mở rộng → Apps Script**, dán đoạn mã tôi gửi, điền 3 ô: token Zalo, khóa Claude, mã bí mật | |
+| 4 | Trong Google Sheet: **Tiện ích mở rộng → Apps Script**, dán đoạn mã tôi gửi (không cần sửa) | |
 | 5 | Bấm **Triển khai (Deploy)** thành ứng dụng web, rồi chạy hàm **caiDat** một lần. Hàm này tự nối bot Zalo và tạo lịch chạy mỗi 15 phút (tóm tắt 8h sáng, nhắc trước hạn) | |
 | 6 | Nhắn `hd` cho bot để thử | |
 

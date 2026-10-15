@@ -1,19 +1,10 @@
 /**
  * ZaloPlan – bot Zalo lập kế hoạch công việc, chạy bằng Google Apps Script.
- * Hướng dẫn cài đặt: xem file HUONG-DAN.md.
  *
- * ============ PHẦN BẠN CẦN ĐIỀN (chỉ sửa chữ trong dấu nháy) ============
+ * KHÔNG CẦN SỬA GÌ TRONG FILE NÀY. Sau khi dán và lưu, tải lại Google Sheet,
+ * rồi dùng menu "🤖 ZaloPlan" trên thanh menu của bảng tính.
+ * Hướng dẫn: xem file HUONG-DAN.md.
  */
-const CAU_HINH = {
-  BOT_TOKEN: 'DIEN_BOT_TOKEN_ZALO',        // Token bot Zalo (Bước 1)
-  KHOA_CLAUDE: 'DIEN_KHOA_CLAUDE',         // Khóa API Claude, bắt đầu bằng sk-ant- (Bước 3)
-  MA_BI_MAT: 'DIEN_MA_BI_MAT_TU_DAT',      // Tự đặt: 16–40 ký tự, chỉ chữ không dấu và số
-  LINK_WEB_APP: 'DIEN_LINK_WEB_APP',       // Link ứng dụng web sau khi Triển khai (Bước 5)
-  // Mô hình AI. Từ 17/11/2026 (hết credit khuyến mãi) đổi thành: 'claude-haiku-5-5'
-  MO_HINH_AI: 'claude-opus-5-5',
-};
-/* ======================= HẾT PHẦN CẦN ĐIỀN ============================= */
-
 const TEN_TRANG = 'CongViec';
 const COT = ['ID', 'Viec', 'NguoiLam', 'HanChot', 'UuTien', 'DuAn', 'TrangThai', 'TinGoc', 'NguoiGui', 'ChatID', 'TaoLuc', 'XongLuc', 'DaNhac'];
 const ZALO_API = 'https://bot-api.zaloplatforms.com/bot';
@@ -26,35 +17,127 @@ const HUONG_DAN =
   '• xong ABCD: đánh dấu việc ABCD đã xong\n' +
   '• xoa ABCD: xóa việc ABCD (khi AI hiểu sai)';
 
-// ---------------------------------------------------------------------------
-// 1. Cài đặt: chạy hàm này MỘT LẦN sau khi Triển khai (Deploy)
-// ---------------------------------------------------------------------------
-function caiDat() {
-  const thieu = Object.entries(CAU_HINH).filter(([, v]) => String(v).startsWith('DIEN_')).map(([k]) => k);
-  if (thieu.length) throw new Error('Bạn chưa điền: ' + thieu.join(', ') + '. Sửa ở đầu file rồi chạy lại.');
-  if (!/^[A-Za-z0-9]{16,40}$/.test(CAU_HINH.MA_BI_MAT)) throw new Error('MA_BI_MAT phải gồm 16–40 ký tự, chỉ chữ không dấu và số.');
-  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(CAU_HINH.LINK_WEB_APP)) {
-    throw new Error('LINK_WEB_APP chưa đúng. Đó là link "Ứng dụng web" dạng https://script.google.com/macros/s/.../exec khi bạn bấm Triển khai.');
-  }
+const MO_HINH_MANH = 'claude-opus-5-5';
+const MO_HINH_TIET_KIEM = 'claude-haiku-5-5';
 
+/** Cấu hình lưu trong "Thuộc tính tập lệnh" (Script Properties), nhập qua menu. */
+function cfg_() {
+  const p = PropertiesService.getScriptProperties();
+  return {
+    BOT_TOKEN: p.getProperty('BOT_TOKEN') || '',
+    KHOA_CLAUDE: p.getProperty('KHOA_CLAUDE') || '',
+    MA_BI_MAT: p.getProperty('MA_BI_MAT') || '',
+    LINK_WEB_APP: p.getProperty('LINK_WEB_APP') || '',
+    MO_HINH_AI: p.getProperty('MO_HINH_AI') || MO_HINH_MANH,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 1. Menu trong Google Sheet và cài đặt
+// ---------------------------------------------------------------------------
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('🤖 ZaloPlan')
+    .addItem('⚙️ Cài đặt và kết nối bot', 'menuCaiDat')
+    .addItem('🔍 Kiểm tra kết nối', 'menuKiemTra')
+    .addSeparator()
+    .addItem('💰 Đổi sang AI tiết kiệm (Haiku)', 'menuAiTietKiem')
+    .addItem('🧠 Đổi sang AI mạnh (Opus)', 'menuAiManh')
+    .addToUi();
+}
+
+function hoi_(ui, tieuDe, giaiThich) {
+  const r = ui.prompt(tieuDe, giaiThich, ui.ButtonSet.OK_CANCEL);
+  if (r.getSelectedButton() !== ui.Button.OK) return null;
+  return r.getResponseText().trim();
+}
+
+function menuCaiDat() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  const cu = cfg_();
+  const giu = (v) => (v ? ' (đang có, để trống nếu giữ nguyên)' : '');
+
+  const token = hoi_(ui, '1/3. Token bot Zalo', 'Dán token Zalo nhận được khi tạo bot (dạng 1234567890:AbCd...)' + giu(cu.BOT_TOKEN));
+  if (token === null) return;
+  const khoa = hoi_(ui, '2/3. Khóa Claude', 'Dán khóa API Claude (bắt đầu bằng sk-ant-)' + giu(cu.KHOA_CLAUDE));
+  if (khoa === null) return;
+  const link = hoi_(ui, '3/3. Link ứng dụng web', 'Dán link có được khi bấm Triển khai (dạng https://script.google.com/macros/s/.../exec)' + giu(cu.LINK_WEB_APP));
+  if (link === null) return;
+
+  if (token) props.setProperty('BOT_TOKEN', token);
+  if (khoa) props.setProperty('KHOA_CLAUDE', khoa);
+  if (link) props.setProperty('LINK_WEB_APP', link);
+  if (!cu.MA_BI_MAT) props.setProperty('MA_BI_MAT', taoMaBiMat_());
+
+  try {
+    ui.alert('✅ Cài đặt thành công', caiDat().join('\n'), ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert('⚠️ Chưa xong', String(err.message || err) + '\n\nSửa lại rồi bấm menu "Cài đặt và kết nối bot" lần nữa.', ui.ButtonSet.OK);
+  }
+}
+
+function menuKiemTra() {
+  const ui = SpreadsheetApp.getUi();
+  const c = cfg_();
+  const dong = [
+    'Token Zalo: ' + (c.BOT_TOKEN ? 'đã có' : 'CHƯA CÓ'),
+    'Khóa Claude: ' + (c.KHOA_CLAUDE ? 'đã có' : 'CHƯA CÓ'),
+    'Link ứng dụng web: ' + (c.LINK_WEB_APP || 'CHƯA CÓ'),
+    'Mô hình AI: ' + c.MO_HINH_AI,
+    'Lịch chạy mỗi 15 phút: ' + (ScriptApp.getProjectTriggers().some((t) => t.getHandlerFunction() === 'moi15Phut') ? 'đang bật' : 'CHƯA BẬT'),
+  ];
+  if (c.BOT_TOKEN) {
+    const me = goiZalo_('getMe', {});
+    dong.push('Bot Zalo: ' + (me.ok ? 'hoạt động (' + ((me.result && me.result.account_name) || '') + ')' : 'LỖI ' + JSON.stringify(me).slice(0, 150)));
+    const wh = goiZalo_('getWebhookInfo', {});
+    dong.push('Webhook: ' + JSON.stringify(wh.result || wh).slice(0, 200));
+  }
+  ui.alert('🔍 Trạng thái ZaloPlan', dong.join('\n'), ui.ButtonSet.OK);
+}
+
+function menuAiTietKiem() { doiMoHinh_(MO_HINH_TIET_KIEM, 'AI tiết kiệm (Haiku): rẻ hơn khoảng 40 lần.'); }
+function menuAiManh() { doiMoHinh_(MO_HINH_MANH, 'AI mạnh (Opus): hiểu tin phức tạp tốt hơn, tốn credit hơn.'); }
+function doiMoHinh_(model, moTa) {
+  PropertiesService.getScriptProperties().setProperty('MO_HINH_AI', model);
+  SpreadsheetApp.getUi().alert('Đã đổi mô hình', 'Bot sẽ dùng ' + moTa + '\nCó hiệu lực ngay với tin nhắn tiếp theo.', SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function taoMaBiMat_() {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  return Array.from({ length: 32 }, () => abc[Math.floor(Math.random() * abc.length)]).join('');
+}
+
+/** Kiểm tra và kết nối mọi thứ. Trả về danh sách dòng kết quả; lỗi thì báo bằng tiếng Việt. */
+function caiDat() {
+  const c = cfg_();
+  if (!c.BOT_TOKEN) throw new Error('Chưa có token bot Zalo.');
+  if (!/^sk-ant-/.test(c.KHOA_CLAUDE)) throw new Error('Khóa Claude phải bắt đầu bằng sk-ant-');
+  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(c.LINK_WEB_APP)) {
+    throw new Error('Link ứng dụng web chưa đúng. Đó là link dạng https://script.google.com/macros/s/.../exec hiện ra khi bạn bấm Triển khai → Tùy chọn triển khai mới.');
+  }
+  const kq = [];
   const sheet = layTrang_();
   sheet.getRange(1, 1, sheet.getMaxRows(), COT.length).setNumberFormat('@'); // giữ nguyên chữ, không tự đổi thành ngày
-
-  ScriptApp.getProjectTriggers().forEach((t) => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('moi15Phut').timeBased().everyMinutes(15).create();
-  console.log('✅ Đã tạo lịch chạy mỗi 15 phút (tóm tắt 8h sáng + nhắc trước hạn).');
+  kq.push('✅ Bảng tính CongViec đúng 13 cột.');
 
   const me = goiZalo_('getMe', {});
-  if (!me.ok) throw new Error('Token Zalo không đúng. Zalo trả lời: ' + JSON.stringify(me));
-  console.log('✅ Token Zalo đúng. Bot: ' + JSON.stringify(me.result));
+  if (!me.ok) throw new Error('Token Zalo không đúng. Zalo trả lời: ' + JSON.stringify(me).slice(0, 200));
+  kq.push('✅ Token Zalo đúng. Bot: ' + ((me.result && me.result.account_name) || ''));
 
-  const wh = goiZalo_('setWebhook', { url: CAU_HINH.LINK_WEB_APP + '?key=' + CAU_HINH.MA_BI_MAT, secret_token: CAU_HINH.MA_BI_MAT });
-  console.log((wh.ok ? '✅' : '⚠️') + ' Kết quả nối webhook: ' + JSON.stringify(wh));
+  const ai = goiClaude_({ model: c.MO_HINH_AI, max_tokens: 1000, messages: [{ role: 'user', content: 'Trả lời đúng một chữ: OK' }] });
+  if (!ai || ai.type === 'error') throw new Error('Khóa Claude có vấn đề: ' + JSON.stringify(ai && ai.error).slice(0, 200));
+  kq.push('✅ Khóa Claude dùng được (' + c.MO_HINH_AI + ').');
 
-  const ai = goiClaude_({ model: CAU_HINH.MO_HINH_AI, max_tokens: 1000, messages: [{ role: 'user', content: 'Trả lời đúng một chữ: OK' }] });
-  if (ai.type === 'error') throw new Error('Khóa Claude có vấn đề: ' + JSON.stringify(ai.error));
-  console.log('✅ Khóa Claude dùng được.');
-  console.log('🎉 Cài đặt xong! Mở Zalo, nhắn "hd" cho bot để thử.');
+  const wh = goiZalo_('setWebhook', { url: c.LINK_WEB_APP + '?key=' + c.MA_BI_MAT, secret_token: c.MA_BI_MAT });
+  kq.push((wh.ok ? '✅' : '⚠️') + ' Nối webhook Zalo: ' + JSON.stringify(wh.result || wh).slice(0, 200));
+
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'moi15Phut').forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('moi15Phut').timeBased().everyMinutes(15).create();
+  kq.push('✅ Đã bật lịch chạy mỗi 15 phút (tóm tắt 8h sáng, nhắc trước hạn).');
+  kq.push('');
+  kq.push('🎉 Xong! Mở Zalo, nhắn "hd" cho bot để thử.');
+  kq.forEach((d) => console.log(d));
+  return kq;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +149,7 @@ function doGet() {
 
 function doPost(e) {
   try {
-    if (!e || !e.parameter || e.parameter.key !== CAU_HINH.MA_BI_MAT) return HtmlService.createHtmlOutput('ok');
+    if (!e || !e.parameter || !cfg_().MA_BI_MAT || e.parameter.key !== cfg_().MA_BI_MAT) return HtmlService.createHtmlOutput('ok');
     const body = JSON.parse((e.postData && e.postData.contents) || '{}');
     const update = body.result || body;
     const msg = update.message || {};
@@ -95,7 +178,7 @@ function xuLyTin_(update) {
 
   const now = Date.now();
   // Gọi AI trước, ngoài khóa, để nhiều tin đến cùng lúc không phải chờ nhau
-  const res = tin.route === 'ai' ? goiClaude_(taoYeuCauAI(tin, CAU_HINH.MO_HINH_AI, now)) : null;
+  const res = tin.route === 'ai' ? goiClaude_(taoYeuCauAI(tin, cfg_().MO_HINH_AI, now)) : null;
 
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -186,7 +269,7 @@ function ghiO_(sheet, rows, id, giaTri) {
 }
 
 function goiZalo_(method, payload) {
-  const res = UrlFetchApp.fetch(ZALO_API + CAU_HINH.BOT_TOKEN + '/' + method, {
+  const res = UrlFetchApp.fetch(ZALO_API + cfg_().BOT_TOKEN + '/' + method, {
     method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true,
   });
   try { return JSON.parse(res.getContentText()); } catch (e) { return { ok: false, http: res.getResponseCode(), text: res.getContentText().slice(0, 300) }; }
@@ -198,7 +281,7 @@ function guiTin_(chatId, text) {
 
 function goiClaude_(yeuCau) {
   const coFallback = Boolean(yeuCau.fallbacks);
-  const headers = { 'x-api-key': CAU_HINH.KHOA_CLAUDE, 'anthropic-version': '2023-06-01' };
+  const headers = { 'x-api-key': cfg_().KHOA_CLAUDE, 'anthropic-version': '2023-06-01' };
   if (coFallback) headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
   try {
     const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
