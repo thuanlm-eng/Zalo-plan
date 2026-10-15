@@ -40,12 +40,21 @@ Trong thư mục này có sẵn 4 file:
 
 ## Bước 1. Tạo bot Zalo và lấy mã bot (Bot Token)
 
-1. Vào trang **Zalo Bot Platform**: [bot.zaloplatforms.com](https://bot.zaloplatforms.com) và đăng nhập bằng tài khoản Zalo.
-2. Bấm **Tạo bot**, đặt tên (ví dụ `ZaloPlan của Minh`) và ảnh đại diện.
-3. Sau khi tạo xong, tìm **Bot Token** (một chuỗi dạng `12345678:AbCdEf...`). Token có thể nằm trong trang quản lý bot hoặc trong tin nhắn Zalo gửi cho bạn ngay sau khi tạo.
-4. Lưu token vào chỗ an toàn. **Ai có token này sẽ điều khiển được bot**, nên đừng gửi cho người khác.
+Làm ngay trên **ứng dụng Zalo trong điện thoại**, khoảng 5 phút:
 
-> Giao diện trang của Zalo có thể khác một chút so với mô tả. Nếu không thấy, tìm mục "Token" hoặc "Thông tin bot".
+1. Mở Zalo, gõ vào ô tìm kiếm: **Zalo Bot Manager**. Chọn tài khoản chính thức (Official Account) có tên đó, bấm **Quan tâm** nếu được hỏi.
+2. Trong khung chat với Zalo Bot Manager, mở **menu ở dưới cùng** và chọn **Tạo bot**. Ứng dụng nhỏ **Zalo Bot Creator** sẽ mở ra.
+3. Điền thông tin bot:
+   - **Tên bot bắt buộc bắt đầu bằng chữ `Bot`**, ví dụ `Bot ZaloPlan Minh`. Tên không đúng quy tắc sẽ không tạo được.
+   - Điền các thông tin còn lại (mô tả, ảnh đại diện nếu có), rồi xác nhận tạo.
+4. Sau khi tạo xong, Zalo sẽ **gửi Bot Token cho bạn qua tin nhắn Zalo**. Token có dạng `1234567890:AbCdEf...` (một dãy số, dấu hai chấm, rồi một chuỗi ký tự).
+5. Bấm giữ tin nhắn để **sao chép toàn bộ token**, cả phần số và phần sau dấu hai chấm. Lưu vào ghi chú riêng tư.
+
+> **Giữ bí mật token.** Ai có token này sẽ điều khiển được bot. Không gửi vào nhóm chat và không chụp màn hình chia sẻ.
+>
+> **Nếu không thấy mục "Tạo bot"** trong app: vào trang [bot.zaloplatforms.com](https://bot.zaloplatforms.com) trên máy tính, đăng nhập bằng Zalo và tạo bot ở đó.
+>
+> Nền tảng bot của Zalo đang ở giai đoạn thử nghiệm (Beta), nên tên nút và giao diện có thể khác một chút. Mỗi tài khoản cũng chỉ tạo được số bot giới hạn.
 
 ## Bước 2. Tạo Google Sheet
 
