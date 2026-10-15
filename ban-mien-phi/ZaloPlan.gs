@@ -43,6 +43,9 @@ function onOpen() {
     .addItem('💰 Đổi sang AI tiết kiệm (Haiku)', 'menuAiTietKiem')
     .addItem('🧠 Đổi sang AI mạnh (Opus)', 'menuAiManh')
     .addSeparator()
+    .addItem('📊 Mở bảng theo dõi (web)', 'menuBangTheoDoi')
+    .addItem('🔄 Đổi link bảng theo dõi', 'menuDoiLinkBang')
+    .addSeparator()
     .addItem('⚡ Thử chế độ webhook (nâng cao)', 'menuWebhook')
     .addToUi();
 }
@@ -187,7 +190,13 @@ function layTinMoi() {
   }
 }
 
-function doGet() {
+function doGet(e) {
+  const key = PropertiesService.getScriptProperties().getProperty('XEM_KEY');
+  if (key && e && e.parameter && e.parameter.xem === key) {
+    return HtmlService.createHtmlOutput(htmlBangTheoDoi(duLieuBang_(), key))
+      .setTitle('ZaloPlan – Bảng theo dõi')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
   return HtmlService.createHtmlOutput('ZaloPlan đang chạy.');
 }
 
@@ -246,6 +255,228 @@ function xuLyTin_(update) {
   }
   guiTin_(tin.chatId, reply);
 }
+
+// ---------------------------------------------------------------------------
+// 2b. Bảng theo dõi (trang web)
+// ---------------------------------------------------------------------------
+function menuBangTheoDoi() {
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('XEM_KEY')) props.setProperty('XEM_KEY', taoMaBiMat_());
+  let link = props.getProperty('LINK_WEB_APP') || '';
+  if (!/\/exec$/.test(link)) {
+    link = hoi_(ui, 'Link ứng dụng web', 'Dán link có được khi bấm Triển khai (dạng https://script.google.com/macros/s/.../exec)') || '';
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(link)) return ui.alert('Link chưa đúng', 'Link phải bắt đầu bằng https://script.google.com/ và kết thúc bằng /exec.', ui.ButtonSet.OK);
+    props.setProperty('LINK_WEB_APP', link);
+  }
+  const url = link + '?xem=' + props.getProperty('XEM_KEY');
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">' +
+    '<p><a href="' + url + '" target="_blank" style="font-size:16px;font-weight:bold">👉 Bấm vào đây để mở bảng theo dõi</a></p>' +
+    '<p>Lưu link này lại (dấu trang, hoặc gửi cho chính bạn qua Zalo) để mở trên điện thoại.</p>' +
+    '<p style="color:#666">Ai có link đều xem được danh sách việc. Muốn thu hồi, bấm menu <b>🔄 Đổi link bảng theo dõi</b>.</p>' +
+    '<p style="color:#666">Nếu mở ra chỉ thấy chữ "ZaloPlan đang chạy", hãy cập nhật bản triển khai: <b>Triển khai → Quản lý các bản triển khai → ✏️ → Phiên bản mới → Triển khai</b>.</p>' +
+    '<input style="width:100%;font-size:12px" readonly value="' + url + '" onclick="this.select()"></div>'
+  ).setWidth(520).setHeight(300);
+  ui.showModalDialog(html, '📊 Bảng theo dõi công việc');
+}
+
+function menuDoiLinkBang() {
+  PropertiesService.getScriptProperties().setProperty('XEM_KEY', taoMaBiMat_());
+  SpreadsheetApp.getUi().alert('Đã đổi link', 'Link cũ không còn xem được nữa. Bấm "📊 Mở bảng theo dõi" để lấy link mới.', SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/** Trang web gọi hàm này mỗi phút để lấy dữ liệu mới. */
+function layDuLieuBang(key) {
+  if (!key || key !== PropertiesService.getScriptProperties().getProperty('XEM_KEY')) throw new Error('Link không hợp lệ');
+  return duLieuBang_();
+}
+
+function duLieuBang_() {
+  return { capNhat: Date.now(), viec: chuanHoaViec(docViec_(layTrang_())) };
+}
+
+/** Rút gọn các dòng trong Sheet thành dữ liệu cho bảng theo dõi (bỏ việc đã xóa). */
+function chuanHoaViec(rows) {
+  return rows.filter((r) => r.TrangThai !== 'Đã xóa').map((r) => ({
+    ID: r.ID, Viec: r.Viec, NguoiLam: r.NguoiLam, DuAn: r.DuAn, UuTien: r.UuTien,
+    TrangThai: r.TrangThai, han: hanMs(r.HanChot), xong: hanMs(r.XongLuc),
+  }));
+}
+
+/** Gom việc theo nhóm và tính số liệu (chạy cả trên máy chủ để kiểm tra, cả trong trình duyệt). */
+function nhomViec(viec, nowMs, loc) {
+  loc = loc || {};
+  const tu = (loc.tim || '').toLowerCase();
+  const hop = viec.filter((v) =>
+    (!loc.nguoi || (v.NguoiLam || 'Chưa giao') === loc.nguoi) &&
+    (!loc.duAn || v.DuAn === loc.duAn) &&
+    (!tu || [v.ID, v.Viec, v.NguoiLam, v.DuAn].join(' ').toLowerCase().indexOf(tu) >= 0));
+  const homNay = vn(nowMs).ymd;
+  const nhom = { tre: [], homNay: [], sap: [], xa: [], chuaHan: [], xong: [] };
+  hop.forEach((v) => {
+    if (v.TrangThai === 'Xong') { if (v.xong != null && v.xong >= nowMs - 7 * 86400000) nhom.xong.push(v); return; }
+    if (v.TrangThai !== 'Mới') return;
+    if (v.han == null) nhom.chuaHan.push(v);
+    else if (v.han < nowMs) nhom.tre.push(v);
+    else if (vn(v.han).ymd === homNay) nhom.homNay.push(v);
+    else if (v.han < nowMs + 7 * 86400000) nhom.sap.push(v);
+    else nhom.xa.push(v);
+  });
+  const theoHan = (a, b) => (a.han == null ? Infinity : a.han) - (b.han == null ? Infinity : b.han) || (a.UuTien === 'Cao' ? -1 : 0) - (b.UuTien === 'Cao' ? -1 : 0);
+  Object.keys(nhom).forEach((k) => nhom[k].sort(k === 'xong' ? (a, b) => b.xong - a.xong : theoHan));
+  const nguoi = {};
+  ['tre', 'homNay', 'sap', 'xa', 'chuaHan'].forEach((k) => nhom[k].forEach((v) => {
+    const t = v.NguoiLam || 'Chưa giao';
+    nguoi[t] = nguoi[t] || { ten: t, mo: 0, tre: 0 };
+    nguoi[t].mo++;
+    if (k === 'tre') nguoi[t].tre++;
+  }));
+  const mo = nhom.tre.length + nhom.homNay.length + nhom.sap.length + nhom.xa.length + nhom.chuaHan.length;
+  return {
+    kpi: { mo, tre: nhom.tre.length, homNay: nhom.homNay.length, xong7: nhom.xong.length },
+    nhom,
+    theoNguoi: Object.keys(nguoi).map((k) => nguoi[k]).sort((a, b) => b.mo - a.mo || a.ten.localeCompare(b.ten)),
+  };
+}
+
+function htmlBangTheoDoi(duLieu, key) {
+  const json = JSON.stringify(duLieu).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  const dungChung = [pad2, vn, hanMs, nhomViec].map((f) => f.toString()).join('\n');
+  return HTML_BANG
+    .replace('/*DU_LIEU*/', () => 'var DU_LIEU = ' + json + ';\nvar KEY = ' + JSON.stringify(key) + ';\nvar THU = ' + JSON.stringify(THU) + ';\n' + dungChung);
+}
+
+const HTML_BANG = `<!doctype html>
+<html lang="vi"><head><meta charset="utf-8">
+<style>
+:root{color-scheme:light;--bg:#f4f4f2;--surface:#fcfcfb;--line:#e3e2de;--text:#0b0b0b;--text2:#52514e;--muted:#7a7974;
+--bar:#2a78d6;--critical:#d03b3b;--warning:#b77800;--good:#0b8a0b;--chip:#f0efec}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#111110;--surface:#1a1a19;--line:#2e2e2b;--text:#f0efec;--text2:#c3c2b7;--muted:#9a998f;
+--bar:#3987e5;--critical:#e66767;--warning:#fab219;--good:#0ca30c;--chip:#262624}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 40px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px;margin-bottom:16px}
+h1{font-size:22px;margin:0}
+.sub{color:var(--muted);font-size:13px}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+select,input{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+input{flex:1 1 200px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .n{font-size:34px;font-weight:700;line-height:1.1}
+.kpi .l{color:var(--text2);font-size:13px;margin-top:4px}
+.kpi.tre .n{color:var(--critical)}.kpi.hn .n{color:var(--warning)}.kpi.xong .n{color:var(--good)}
+.grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:16px;align-items:start}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:6px}
+.card h2 .c{color:var(--muted);font-weight:400}
+.task{padding:10px 0;border-top:1px solid var(--line)}
+.task:first-of-type{border-top:0}
+.t1{font-weight:600}.t1 .id{color:var(--muted);font-weight:400;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-right:6px}
+.meta{color:var(--text2);font-size:13px;margin-top:2px;display:flex;flex-wrap:wrap;gap:4px 12px}
+.chip{background:var(--chip);border-radius:999px;padding:0 8px;font-size:12px}
+.chip.gap{color:var(--critical)}
+.han-tre{color:var(--critical);font-weight:600}
+.empty{color:var(--muted);font-size:13px;padding:4px 0}
+.bars{display:flex;flex-direction:column;gap:10px}
+.bar-row{display:grid;grid-template-columns:96px 1fr 34px;align-items:center;gap:8px;font-size:13px}
+.bar-row .ten{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2)}
+.track{height:14px;position:relative}
+.fill{height:14px;background:var(--bar);border-radius:0 4px 4px 0;min-width:2px}
+.bar-row .v{text-align:right;font-variant-numeric:tabular-nums}
+.bar-row .v small{color:var(--critical)}
+.note{color:var(--muted);font-size:12px;margin-top:8px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style></head>
+<body><div class="wrap">
+<header><div><h1>📋 Bảng theo dõi công việc</h1><div class="sub" id="capNhat"></div></div></header>
+<div class="filters">
+<select id="locNguoi" aria-label="Lọc theo người làm"></select>
+<select id="locDuAn" aria-label="Lọc theo dự án"></select>
+<input id="tim" type="search" placeholder="Tìm việc, mã, người, dự án…" aria-label="Tìm kiếm">
+</div>
+<div class="kpis" id="kpis"></div>
+<div class="grid"><div id="cot1"></div><div id="cot2"></div></div>
+</div>
+<script>
+/*DU_LIEU*/
+var loc = { nguoi: '', duAn: '', tim: '' };
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function hienHan(v, now) {
+  if (v.han == null) return 'chưa có hạn';
+  var d = vn(v.han), h = vn(now);
+  if (d.ymd === h.ymd) return 'hôm nay ' + d.hm;
+  return d.hm + ' ' + d.thu + ' ' + d.dm;
+}
+function the(v, now, xong) {
+  var t = el('div', 'task');
+  var t1 = el('div', 't1'); t1.appendChild(el('span', 'id', v.ID)); t1.appendChild(document.createTextNode(v.Viec)); t.appendChild(t1);
+  var m = el('div', 'meta');
+  if (v.NguoiLam) m.appendChild(el('span', '', '👤 ' + v.NguoiLam));
+  if (xong) m.appendChild(el('span', '', '✅ xong ' + vn(v.xong).dm));
+  else m.appendChild(el('span', v.han != null && v.han < now ? 'han-tre' : '', '⏰ ' + (v.han != null && v.han < now ? 'trễ hạn ' + vn(v.han).dm : hienHan(v, now))));
+  if (v.DuAn) m.appendChild(el('span', '', '📁 ' + v.DuAn));
+  if (v.UuTien === 'Cao' && !xong) m.appendChild(el('span', 'chip gap', '🔥 Gấp'));
+  t.appendChild(m);
+  return t;
+}
+function nhomCard(tieuDe, ds, now, xong, trongNeu) {
+  var c = el('section', 'card'); var h = el('h2', '', tieuDe + ' '); h.appendChild(el('span', 'c', '(' + ds.length + ')')); c.appendChild(h);
+  if (!ds.length) c.appendChild(el('div', 'empty', trongNeu || 'Không có việc nào.'));
+  ds.slice(0, 100).forEach(function (v) { c.appendChild(the(v, now, xong)); });
+  return c;
+}
+function chonLua(sel, nhan, giaTri, hienTai) {
+  sel.innerHTML = '';
+  var o = el('option', '', nhan); o.value = ''; sel.appendChild(o);
+  giaTri.forEach(function (g) { var x = el('option', '', g); x.value = g; if (g === hienTai) x.selected = true; sel.appendChild(x); });
+}
+function ve() {
+  var now = Date.now();
+  var mo = DU_LIEU.viec.filter(function (v) { return v.TrangThai !== 'Đã xóa'; });
+  var nguoi = {}, duAn = {};
+  mo.forEach(function (v) { nguoi[v.NguoiLam || 'Chưa giao'] = 1; if (v.DuAn) duAn[v.DuAn] = 1; });
+  chonLua(document.getElementById('locNguoi'), 'Tất cả người làm', Object.keys(nguoi).sort(), loc.nguoi);
+  chonLua(document.getElementById('locDuAn'), 'Tất cả dự án', Object.keys(duAn).sort(), loc.duAn);
+  var kq = nhomViec(DU_LIEU.viec, now, loc);
+  var t = vn(DU_LIEU.capNhat);
+  document.getElementById('capNhat').textContent = 'Cập nhật lúc ' + t.hm + ' ' + t.dm + ' · tự làm mới mỗi phút';
+  var k = document.getElementById('kpis'); k.innerHTML = '';
+  [['', kq.kpi.mo, 'Việc đang mở'], ['tre', kq.kpi.tre, '⚠️ Trễ hạn'], ['hn', kq.kpi.homNay, '📅 Hạn hôm nay'], ['xong', kq.kpi.xong7, '✅ Xong 7 ngày qua']]
+    .forEach(function (x) { var d = el('div', 'kpi ' + x[0]); d.appendChild(el('div', 'n', String(x[1]))); d.appendChild(el('div', 'l', x[2])); k.appendChild(d); });
+  var c1 = document.getElementById('cot1'); c1.innerHTML = '';
+  c1.appendChild(nhomCard('⚠️ Trễ hạn', kq.nhom.tre, now, false, 'Không có việc trễ hạn. 👏'));
+  c1.appendChild(nhomCard('📅 Hôm nay', kq.nhom.homNay, now));
+  c1.appendChild(nhomCard('🗓 7 ngày tới', kq.nhom.sap, now));
+  if (kq.nhom.xa.length) c1.appendChild(nhomCard('🔭 Xa hơn', kq.nhom.xa, now));
+  c1.appendChild(nhomCard('📌 Chưa có hạn', kq.nhom.chuaHan, now));
+  var c2 = document.getElementById('cot2'); c2.innerHTML = '';
+  var bc = el('section', 'card'); bc.appendChild(el('h2', '', '👥 Việc đang mở theo người'));
+  var bars = el('div', 'bars'); var max = Math.max.apply(null, kq.theoNguoi.map(function (p) { return p.mo; }).concat([1]));
+  kq.theoNguoi.forEach(function (p) {
+    var r = el('div', 'bar-row'); r.title = p.ten + ': ' + p.mo + ' việc đang mở' + (p.tre ? ', ' + p.tre + ' trễ hạn' : '');
+    r.appendChild(el('div', 'ten', p.ten));
+    var tr = el('div', 'track'); var f = el('div', 'fill'); f.style.width = (p.mo / max * 100) + '%'; tr.appendChild(f); r.appendChild(tr);
+    var v = el('div', 'v', String(p.mo)); if (p.tre) { v.appendChild(document.createElement('br')); v.appendChild(el('small', '', p.tre + ' trễ')); } r.appendChild(v);
+    bars.appendChild(r);
+  });
+  if (!kq.theoNguoi.length) bars.appendChild(el('div', 'empty', 'Chưa có việc đang mở.'));
+  bc.appendChild(bars); bc.appendChild(el('div', 'note', 'Số bên phải: số việc đang mở; chữ đỏ: số việc trễ hạn.'));
+  c2.appendChild(bc);
+  c2.appendChild(nhomCard('✅ Đã xong 7 ngày qua', kq.nhom.xong, now, true));
+}
+document.getElementById('locNguoi').onchange = function (e) { loc.nguoi = e.target.value; ve(); };
+document.getElementById('locDuAn').onchange = function (e) { loc.duAn = e.target.value; ve(); };
+document.getElementById('tim').oninput = function (e) { loc.tim = e.target.value; ve(); };
+ve();
+setInterval(function () {
+  if (window.google && google.script && google.script.run) {
+    google.script.run.withSuccessHandler(function (d) { DU_LIEU = d; ve(); }).layDuLieuBang(KEY);
+  } else { ve(); }
+}, 60000);
+</script></body></html>`;
 
 // ---------------------------------------------------------------------------
 // 3. Chạy tự động mỗi 15 phút: tóm tắt 8h sáng và nhắc việc sắp đến hạn

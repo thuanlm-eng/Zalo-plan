@@ -60,6 +60,24 @@ Nếu hiện **⚠️ Chưa xong**, bảng sẽ ghi rõ lỗi bằng tiếng Vi�
 | Nhận tóm tắt | Tự động khoảng 8:00–8:15 mỗi sáng |
 | Nhận nhắc | Tự động khoảng 1 tiếng trước hạn |
 
+## 📊 Bảng theo dõi trên web
+
+Một trang web tổng hợp tình trạng công việc. Xem được trên điện thoại và máy tính, tự làm mới mỗi phút. Trang gồm:
+- **4 ô số liệu:** việc đang mở, trễ hạn, hạn hôm nay, đã xong 7 ngày qua.
+- **Biểu đồ việc theo người:** ai đang có bao nhiêu việc, bao nhiêu việc trễ.
+- **Danh sách việc theo nhóm:** trễ hạn, hôm nay, 7 ngày tới, xa hơn, chưa có hạn, đã xong.
+- **Bộ lọc** theo người làm, dự án, và ô tìm kiếm.
+
+**Bật lần đầu:**
+1. Trong Apps Script, bấm **Triển khai → Tùy chọn triển khai mới**. Nếu đã có bản triển khai cũ thì dùng **Triển khai → Quản lý các bản triển khai → ✏️ → Phiên bản: Phiên bản mới**.
+2. Chọn **Ứng dụng web**, **Thực thi dưới dạng: Tôi**, **Người có quyền truy cập: Bất kỳ ai**, rồi bấm **Triển khai**.
+3. Trong Google Sheet bấm **🤖 ZaloPlan → 📊 Mở bảng theo dõi (web)**. Nếu được hỏi link ứng dụng web, dán link `.../exec` vừa có ở bước 2.
+4. Bấm **👉 Bấm vào đây để mở bảng theo dõi**. Lưu link này lại, ví dụ gửi cho chính mình qua Zalo, để mở trên điện thoại.
+
+**Bảo mật:** link có kèm mã bí mật, nên chỉ ai có link mới xem được. Muốn thu hồi thì bấm **🔄 Đổi link bảng theo dõi**.
+
+**Mỗi lần dán mã mới:** làm lại bước 1 (chọn **Phiên bản mới**) để trang web dùng mã mới.
+
 ## ⚠️ Trước ngày 17/11/2026: đổi sang AI tiết kiệm
 
 Credit khuyến mãi 100 USD hết hạn ngày 17/11/2026. Trước ngày đó, trong Google Sheet bấm:

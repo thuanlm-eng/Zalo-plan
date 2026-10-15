@@ -52,7 +52,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
     CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) || null, put: (k, v) => cache.set(k, v), remove: (k) => cache.delete(k) }) },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) || null, setProperty: (k, v) => props.set(k, v) }) },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
-    HtmlService: { createHtmlOutput: (s) => ({ html: s }) },
+    HtmlService: { createHtmlOutput: (s) => { const o = { html: s }; ['setTitle', 'addMetaTag', 'setWidth', 'setHeight'].forEach((f) => Object.defineProperty(o, f, { value: () => o })); return o; } },
     Utilities: { base64Encode: (b) => Buffer.from(b).toString('base64'), computeDigest: (_a, s) => [...require('crypto').createHash('md5').update(s).digest()], DigestAlgorithm: { MD5: 'MD5' } },
     UrlFetchApp: {
       fetch: (url, o) => {
@@ -105,7 +105,7 @@ const t = (name, fn) => { fn(); n++; console.log('ok -', name); };
 t('menu is added on open', () => {
   const e = makeEnv({ now: NOW });
   e.ctx.onOpen();
-  assert.deepStrictEqual(e.ctx.__menu, { name: '🤖 ZaloPlan', items: ['menuCaiDat', 'menuKiemTra', 'menuAiTietKiem', 'menuAiManh', 'menuWebhook'] });
+  assert.deepStrictEqual(e.ctx.__menu, { name: '🤖 ZaloPlan', items: ['menuCaiDat', 'menuKiemTra', 'menuAiTietKiem', 'menuAiManh', 'menuBangTheoDoi', 'menuDoiLinkBang', 'menuWebhook'] });
 });
 t('menu setup: two answers, polling mode on, webhook removed', () => {
   const e = makeEnv({ now: NOW, configured: false });
@@ -325,5 +325,43 @@ t('reminder 60 min before deadline, only once; summary not repeated', () => {
   e.clock.now = Date.UTC(2026, 9, 16, 3, 0); // 10:00 VN: no summary outside 8h
   e.ctx.moi15Phut();
   assert.strictEqual(e.sent.length, 2);
+});
+
+t('dashboard: groups, KPIs, per-person counts, filters', () => {
+  const e = makeEnv({ now: NOW });
+  const D = (s) => e.ctx.hanMs(s);
+  const viec = [
+    { ID: 'A', Viec: 'Trễ', NguoiLam: 'Lan', DuAn: 'Q7', UuTien: 'Cao', TrangThai: 'Mới', han: D('2026-10-14 10:00'), xong: null },
+    { ID: 'B', Viec: 'Hôm nay', NguoiLam: 'Lan', DuAn: '', UuTien: 'Bình thường', TrangThai: 'Mới', han: D('2026-10-15 17:00'), xong: null },
+    { ID: 'C', Viec: 'Sắp tới', NguoiLam: 'Huy', DuAn: 'Q7', UuTien: 'Bình thường', TrangThai: 'Mới', han: D('2026-10-18 09:00'), xong: null },
+    { ID: 'D', Viec: 'Xa', NguoiLam: '', DuAn: '', UuTien: 'Bình thường', TrangThai: 'Mới', han: D('2026-11-30 09:00'), xong: null },
+    { ID: 'E', Viec: 'Không hạn', NguoiLam: 'Huy', DuAn: '', UuTien: 'Bình thường', TrangThai: 'Mới', han: null, xong: null },
+    { ID: 'F', Viec: 'Xong gần', NguoiLam: 'Lan', DuAn: '', UuTien: 'Bình thường', TrangThai: 'Xong', han: null, xong: D('2026-10-14 08:00') },
+    { ID: 'G', Viec: 'Xong lâu', NguoiLam: 'Lan', DuAn: '', UuTien: 'Bình thường', TrangThai: 'Xong', han: null, xong: D('2026-09-01 08:00') },
+  ];
+  const kq = e.ctx.nhomViec(viec, NOW, {});
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(kq.kpi)), { mo: 5, tre: 1, homNay: 1, xong7: 1 });
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(kq.nhom).map(([k, v]) => [k, v.map((x) => x.ID).join('')])), { tre: 'A', homNay: 'B', sap: 'C', xa: 'D', chuaHan: 'E', xong: 'F' });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(kq.theoNguoi)), [{ ten: 'Huy', mo: 2, tre: 0 }, { ten: 'Lan', mo: 2, tre: 1 }, { ten: 'Chưa giao', mo: 1, tre: 0 }]);
+  assert.strictEqual(e.ctx.nhomViec(viec, NOW, { nguoi: 'Lan' }).kpi.mo, 2);
+  assert.strictEqual(e.ctx.nhomViec(viec, NOW, { duAn: 'Q7' }).kpi.mo, 2);
+  assert.strictEqual(e.ctx.nhomViec(viec, NOW, { tim: 'không' }).kpi.mo, 1);
+  assert.strictEqual(e.ctx.nhomViec(viec, NOW, { nguoi: 'Chưa giao' }).kpi.mo, 1);
+});
+t('dashboard: doGet needs the secret view key; data is escaped', () => {
+  const e = makeEnv({ now: NOW });
+  e.grid.push(['XSS1', '</script><img src=x onerror=alert(1)>', 'Lan', '2026-10-16 17:00', 'Cao', '', 'Mới', '', '', 'chat-1', '', '', '']);
+  e.grid.push(['DEL1', 'Đã xóa', '', '', '', '', 'Đã xóa', '', '', 'chat-1', '', '', '']);
+  e.props.set('XEM_KEY', 'xemKey123');
+  assert.strictEqual(e.ctx.doGet({ parameter: {} }).html, 'ZaloPlan đang chạy.');
+  assert.strictEqual(e.ctx.doGet({ parameter: { xem: 'sai' } }).html, 'ZaloPlan đang chạy.');
+  const html = e.ctx.doGet({ parameter: { xem: 'xemKey123' } }).html;
+  assert.match(html, /Bảng theo dõi công việc/);
+  assert.ok(html.includes('\\u003c/script>\\u003cimg'), 'angle brackets escaped inside data');
+  assert.ok(!html.includes('DEL1'), 'deleted tasks not sent');
+  assert.match(html, /function nhomViec/);
+  fs.writeFileSync(path.join(__dirname, 'dashboard-preview.html'), html);
+  assert.throws(() => e.ctx.layDuLieuBang('sai'), /Link không hợp lệ/);
+  assert.strictEqual(e.ctx.layDuLieuBang('xemKey123').viec.length, 1);
 });
 console.log(`\n${n} tests passed`);
