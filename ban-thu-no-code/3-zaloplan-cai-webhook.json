@@ -1,0 +1,125 @@
+{
+  "name": "ZaloPlan 3 – Nối bot Zalo với n8n (chạy 1 lần)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ZaloPlan 3: chạy một lần\n1. Bật kịch bản 1 trước, copy **Production URL** của khối \"Zalo gửi tin đến\".\n2. Điền khối **Cấu hình** bên dưới.\n3. Bấm **Execute workflow**. Khối **Kết quả** hiện `\"ok\": true` là xong.",
+        "width": 420,
+        "height": 220,
+        "color": 5
+      },
+      "id": "dd7784fb-3ab9-4e72-b495-ca252b1dcd3f",
+      "name": "Ghi chú 4d1b",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "de65695a-2c88-447d-b1ce-727b89888032",
+      "name": "Bấm để chạy",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2ac30891-3b95-453e-9797-66b85b3d5a08",
+              "name": "BOT_TOKEN",
+              "value": "DIEN_BOT_TOKEN_ZALO",
+              "type": "string"
+            },
+            {
+              "id": "94510e4b-e5a0-4717-ab91-7004f536b763",
+              "name": "MA_BI_MAT",
+              "value": "DIEN_MA_BI_MAT_GIONG_KICH_BAN_1",
+              "type": "string"
+            },
+            {
+              "id": "2820148b-0943-4c00-a6be-7e2a0cc282d5",
+              "name": "WEBHOOK_URL",
+              "value": "DIEN_PRODUCTION_URL_CUA_KICH_BAN_1",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "3de5bddb-7e3e-49e8-a58e-d18da05a792f",
+      "name": "Cấu hình",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $json.BOT_TOKEN }}/setWebhook",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $json.WEBHOOK_URL, secret_token: $json.MA_BI_MAT }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "c89f7270-9c85-48c4-bab1-5a828b82fd7b",
+      "name": "Kết quả",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        40,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Bấm để chạy": {
+      "main": [
+        [
+          {
+            "node": "Cấu hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu hình": {
+      "main": [
+        [
+          {
+            "node": "Kết quả",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

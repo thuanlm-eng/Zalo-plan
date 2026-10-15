@@ -1,0 +1,360 @@
+{
+  "name": "ZaloPlan 2 – Tóm tắt sáng và nhắc việc",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ZaloPlan 2: nhắc việc\n1. Mở khối **Cấu hình**, điền BOT_TOKEN và LINK_GOOGLE_SHEET (giống kịch bản 1).\n2. Chọn tài khoản Google ở 2 khối Google Sheets.\n3. Bấm **Publish** để bật.\n\nMỗi 8h sáng: gửi tóm tắt. Mỗi giờ: nhắc việc sắp đến hạn trong 60 phút.",
+        "width": 420,
+        "height": 240,
+        "color": 5
+      },
+      "id": "66c5ffe7-878b-46e4-92a4-b6753f206931",
+      "name": "Ghi chú 6573",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 8,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "6e5a8d1a-d328-4fe1-9c68-238466fe8916",
+      "name": "Mỗi sáng 8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "3a0643d0-1205-4c32-a6e6-bf65da719323",
+      "name": "Mỗi giờ",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a84401bc-a9fe-4ee5-8a68-049f9807f287",
+              "name": "BOT_TOKEN",
+              "value": "DIEN_BOT_TOKEN_ZALO",
+              "type": "string"
+            },
+            {
+              "id": "1c49196d-41f2-43ae-8654-baba6705c985",
+              "name": "LINK_GOOGLE_SHEET",
+              "value": "DIEN_LINK_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "36d3ea9d-84f8-47d0-ba81-bd735a7ea671",
+              "name": "CHE_DO",
+              "value": "={{ $('Mỗi sáng 8h').isExecuted ? 'sang' : 'nhac' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "36b5725f-1132-4d03-a66e-feb981cd3273",
+      "name": "Cấu hình",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -180,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Cấu hình').first().json.LINK_GOOGLE_SHEET }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CongViec"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "TrangThai",
+              "lookupValue": "Mới"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a0263618-47ed-4abe-94ac-f1c35fcce270",
+      "name": "Đọc tất cả việc",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        40,
+        40
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Soạn tin tóm tắt buổi sáng, hoặc tin nhắc việc sắp đến hạn, cho từng người.\nconst cheDo = $('Cấu hình').first().json.CHE_DO; // \"sang\" hoặc \"nhac\"\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.ID && r.ChatID && r.TrangThai === 'Mới');\nconst THU = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];\n\nconst hanMs = (s) => {\n  s = String(s || '').trim();\n  let m = s.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[ T](\\d{1,2}):(\\d{2}))?/);\n  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 17, m[5] ? +m[5] : 0) - 7 * 3600 * 1000;\n  m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?/);\n  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1], m[4] ? +m[4] : 17, m[5] ? +m[5] : 0) - 7 * 3600 * 1000;\n  return null;\n};\nconst p = (n) => String(n).padStart(2, '0');\nconst vn = (ms) => {\n  const d = new Date(ms + 7 * 3600 * 1000);\n  return { ymd: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`, hm: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`, thu: THU[d.getUTCDay()], dm: `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}` };\n};\nconst now = Date.now();\nconst out = [];\n\nif (cheDo === 'nhac') {\n  // Nhắc từng việc có hạn trong 60 phút tới và chưa được nhắc\n  for (const r of rows) {\n    const han = hanMs(r.HanChot);\n    if (han == null || han <= now || han > now + 60 * 60 * 1000 || String(r.DaNhac || '').trim()) continue;\n    const d = vn(han);\n    out.push({ json: { chatId: String(r.ChatID), ID: r.ID, DaNhac: 'x', reply: `⏰ Sắp đến hạn lúc ${d.hm}:\\n[${r.ID}] ${r.Viec}${r.NguoiLam ? `\\n👤 ${r.NguoiLam}` : ''}\\n\\nLàm xong thì trả lời \"xong ${r.ID}\".` } });\n  }\n  return out;\n}\n\n// Tóm tắt buổi sáng: gom việc theo người (ChatID)\nconst homNay = vn(now).ymd;\nconst theoNguoi = {};\nfor (const r of rows) (theoNguoi[r.ChatID] = theoNguoi[r.ChatID] || []).push({ ...r, _han: hanMs(r.HanChot) });\n\nfor (const [chatId, ds] of Object.entries(theoNguoi)) {\n  ds.sort((a, b) => (a._han ?? Infinity) - (b._han ?? Infinity));\n  const tre = [], hn = [], sap = [];\n  let chuaHan = 0;\n  for (const r of ds) {\n    const line = (h) => `• [${r.ID}] ${r.Viec}${r.NguoiLam ? ` (${r.NguoiLam})` : ''}${h ? `: ${h}` : ''}${r.UuTien === 'Cao' ? ' 🔥' : ''}`;\n    if (r._han == null) { chuaHan++; continue; }\n    const d = vn(r._han);\n    if (r._han < now) tre.push(line(`hạn ${d.dm}`));\n    else if (d.ymd === homNay) hn.push(line(d.hm));\n    else if (r._han < now + 7 * 86400000) sap.push(line(`${d.thu} ${d.dm}`));\n  }\n  const phan = [`☀️ Chào buổi sáng! Bạn có ${ds.length} việc đang mở.`];\n  if (tre.length) phan.push(`⚠️ Trễ hạn:\\n${tre.join('\\n')}`);\n  if (hn.length) phan.push(`📅 Hôm nay:\\n${hn.join('\\n')}`);\n  if (sap.length) phan.push(`🗓 7 ngày tới:\\n${sap.join('\\n')}`);\n  if (chuaHan) phan.push(`📌 ${chuaHan} việc chưa có hạn.`);\n  phan.push('Gõ \"viec\" để xem đủ danh sách.');\n  out.push({ json: { chatId: String(chatId), reply: phan.join('\\n\\n').slice(0, 2000) } });\n}\nreturn out;\n"
+      },
+      "id": "1d742655-19e2-44d1-8a11-1ea3773bbf5e",
+      "name": "Soạn tin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "79b6109a-31d9-4ab2-a075-1dbed43bb8d6",
+              "leftValue": "={{ $('Cấu hình').first().json.CHE_DO === 'nhac' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "82db214e-63d2-4305-96be-8d5de8971870",
+      "name": "Là tin nhắc?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Cấu hình').first().json.LINK_GOOGLE_SHEET }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CongViec"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.ID }}",
+            "DaNhac": "={{ $json.DaNhac }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "DaNhac",
+              "displayName": "DaNhac",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "bf0f16c1-30a4-4b00-9b52-57b996f59b4f",
+      "name": "Đánh dấu đã nhắc",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        700,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "5d15b0de-8c6f-4134-9e17-903ace812b95",
+      "name": "Gửi tin nhắc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "6f0ae414-559e-4504-8431-9698718671ed",
+      "name": "Gửi tóm tắt",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Mỗi sáng 8h": {
+      "main": [
+        [
+          {
+            "node": "Cấu hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mỗi giờ": {
+      "main": [
+        [
+          {
+            "node": "Cấu hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu hình": {
+      "main": [
+        [
+          {
+            "node": "Đọc tất cả việc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc tất cả việc": {
+      "main": [
+        [
+          {
+            "node": "Soạn tin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Soạn tin": {
+      "main": [
+        [
+          {
+            "node": "Là tin nhắc?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Là tin nhắc?": {
+      "main": [
+        [
+          {
+            "node": "Đánh dấu đã nhắc",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Gửi tin nhắc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gửi tóm tắt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

@@ -1,0 +1,661 @@
+{
+  "name": "ZaloPlan 1 – Nhận tin và lưu việc",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## ZaloPlan 1: nhận tin\n1. Mở khối **Cấu hình**, điền BOT_TOKEN, MA_BI_MAT, LINK_GOOGLE_SHEET.\n2. Chọn tài khoản Google ở 3 khối Google Sheets.\n3. Khối **Gọi AI**: tạo Header Auth, Name `x-api-key`, Value là khóa AI.\n4. Bấm **Publish** để bật.",
+        "width": 420,
+        "height": 240,
+        "color": 5
+      },
+      "id": "da4f634b-be0d-45e0-b36d-b9f58d05f3c6",
+      "name": "Ghi chú 4eba",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zaloplan",
+        "options": {}
+      },
+      "id": "641bebb3-aa47-4a3e-9cf9-880655e2cedb",
+      "name": "Zalo gửi tin đến",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "webhookId": "cc4d0e16-c810-4b9d-a671-fce6953fa609"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1cbe07a8-703a-4232-9106-146f033a7c80",
+              "name": "BOT_TOKEN",
+              "value": "DIEN_BOT_TOKEN_ZALO",
+              "type": "string"
+            },
+            {
+              "id": "684ac313-7e58-46b4-a938-76327b1ba7f7",
+              "name": "MA_BI_MAT",
+              "value": "DIEN_MA_BI_MAT_TU_DAT",
+              "type": "string"
+            },
+            {
+              "id": "e6aae382-6bf8-4704-9970-c56d47656c6b",
+              "name": "LINK_GOOGLE_SHEET",
+              "value": "DIEN_LINK_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "d0f85ee3-232c-495d-8a94-a053daea1f21",
+              "name": "MO_HINH_AI",
+              "value": "claude-opus-5-5",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "b480ed28-3e4c-46af-a55e-2a33a6ef83a0",
+      "name": "Cấu hình",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -180,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Đọc tin Zalo gửi tới, kiểm tra mã bí mật, rồi quyết định bước tiếp theo.\nconst cfg = $('Cấu hình').first().json;\nconst req = $input.first().json;\nconst headers = req.headers || {};\n\n// Chỉ nhận tin do chính Zalo gửi (đúng mã bí mật đã đăng ký)\nif (String(headers['x-bot-api-secret-token'] || '') !== String(cfg.MA_BI_MAT)) {\n  return [];\n}\n\nconst body = req.body || {};\nconst update = body.result || body;\nconst msg = update.message || {};\nconst chatId = String((msg.chat && msg.chat.id) || (msg.from && msg.from.id) || '');\nconst sender = (msg.from && (msg.from.display_name || msg.from.name)) || '';\nconst text = String(msg.text || '').trim();\nif (!chatId) return [];\n\nconst HELP =\n  'Chào bạn, mình là ZaloPlan 👋\\n\\n' +\n  'Chuyển tiếp (forward) hoặc dán tin nhắn giao việc cho mình, mình sẽ tự lưu thành công việc.\\n\\n' +\n  'Các lệnh:\\n' +\n  '• viec: xem việc đang mở\\n' +\n  '• xong ABCD: đánh dấu việc ABCD đã xong\\n' +\n  '• xoa ABCD: xóa việc ABCD (khi AI hiểu sai)';\n\nconst out = (o) => [{ json: { chatId, sender, text, ...o } }];\n\nif (update.event_name && update.event_name !== 'message.text.received') {\n  return out({ route: 'tra_loi', reply: 'Hiện mình chỉ đọc được tin nhắn chữ. Bạn dán nội dung tin nhắn giúp mình nhé.' });\n}\nif (!text) return [];\n\n// Bỏ dấu tiếng Việt để nhận lệnh dù gõ có dấu hay không\nconst plain = text\n  .normalize('NFD').replace(/[̀-ͯ]/g, '')\n  .replace(/đ/g, 'd').replace(/Đ/g, 'D')\n  .toLowerCase().replace(/\\s+/g, ' ').trim();\n\nlet m = plain.match(/^\\/?(xong|done|ok xong)\\s+#?([a-z0-9]{4})$/);\nif (m) return out({ route: 'sheet', lenh: 'cap_nhat', trangThai: 'Xong', taskId: m[2].toUpperCase() });\nm = plain.match(/^\\/?(xoa|huy)\\s+#?([a-z0-9]{4})$/);\nif (m) return out({ route: 'sheet', lenh: 'cap_nhat', trangThai: 'Đã xóa', taskId: m[2].toUpperCase() });\nif (/^\\/?(viec|ds|danh sach|list|cong viec)$/.test(plain)) return out({ route: 'sheet', lenh: 'danh_sach' });\nif (/^\\/?(start|help|huong dan|hd|menu)$/.test(plain)) return out({ route: 'tra_loi', reply: HELP });\nif (plain.length < 4) {\n  return out({ route: 'tra_loi', reply: 'Mình chưa thấy việc nào trong tin này. Gõ \"hd\" để xem hướng dẫn.' });\n}\n\n// ---- Chuẩn bị câu hỏi cho AI ----\nconst TZ = 'Asia/Ho_Chi_Minh';\nconst THU = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];\nconst nowMs = Date.now();\nconst vn = (ms) => {\n  const d = new Date(ms + 7 * 3600 * 1000); // giờ Việt Nam (UTC+7, không đổi giờ)\n  const p = (n) => String(n).padStart(2, '0');\n  return {\n    ymd: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`,\n    dm: `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`,\n    hm: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`,\n    thu: THU[d.getUTCDay()],\n  };\n};\nconst now = vn(nowMs);\nconst lich = [];\nfor (let i = 0; i <= 14; i++) {\n  const d = vn(nowMs + i * 86400000);\n  lich.push(`${d.thu} ${d.dm} = ${d.ymd}${i === 0 ? ' (hôm nay)' : i === 1 ? ' (ngày mai)' : ''}`);\n}\n\nconst system = [\n  'Bạn là trợ lý đọc tin nhắn Zalo tiếng Việt và tách ra các công việc cần làm.',\n  'Quy tắc:',\n  '- Chỉ tạo việc khi tin nhắn có yêu cầu, nhiệm vụ hoặc lời hẹn cần làm. Chào hỏi, cảm ơn, xác nhận (\"ok\", \"đã nhận\"), chuyện phiếm thì trả về danh sách rỗng.',\n  '- Một tin có thể có nhiều việc; tách riêng từng việc.',\n  '- viec: ngắn gọn, bắt đầu bằng động từ, tối đa 80 ký tự, giữ tên riêng và con số quan trọng.',\n  '- nguoi_lam: tên người được giao (ví dụ \"Lan ơi...\" thì là Lan). Không rõ thì để chuỗi rỗng.',\n  '- han_chot: dạng \"YYYY-MM-DD HH:mm\" theo giờ Việt Nam, tính từ thời điểm hiện tại và lịch được cho. Quy ước giờ: sáng 09:00, trưa 12:00, chiều 17:00, tối 20:00, cuối ngày 17:00; chỉ có ngày mà không có giờ thì 17:00. \"Thứ X\" là thứ X gần nhất sắp tới; \"thứ X tuần sau\" là thứ X của tuần kế tiếp; \"cuối tuần\" là Thứ Bảy; \"cuối tháng\" là ngày cuối tháng. Không có hạn thì để chuỗi rỗng, không tự đoán.',\n  '- uu_tien: \"Cao\" nếu có gấp, khẩn, ASAP, quan trọng, ngay; \"Thấp\" nếu khi rảnh, không gấp; còn lại \"Bình thường\".',\n  '- du_an: tên dự án, công trình, khách hàng hoặc đơn hàng nếu có, không thì chuỗi rỗng.',\n  '- Hiểu cả tiếng Việt không dấu và viết tắt: ko/k = không, dc/đc = được, a = anh, e = em, c = chị, nhé/nha/nhe.',\n].join('\\n');\n\nconst userMsg = [\n  `Thời điểm hiện tại: ${now.thu}, ${now.dm} ${now.hm} (giờ Việt Nam).`,\n  'Lịch tham khảo:',\n  ...lich,\n  '',\n  `Người gửi tin cho bot: ${sender || '(không rõ)'}`,\n  'Tin nhắn:',\n  '\"\"\"',\n  text.slice(0, 4000),\n  '\"\"\"',\n].join('\\n');\n\nconst schema = {\n  type: 'object',\n  additionalProperties: false,\n  required: ['tasks'],\n  properties: {\n    tasks: {\n      type: 'array',\n      items: {\n        type: 'object',\n        additionalProperties: false,\n        required: ['viec', 'nguoi_lam', 'han_chot', 'uu_tien', 'du_an'],\n        properties: {\n          viec: { type: 'string' },\n          nguoi_lam: { type: 'string' },\n          han_chot: { type: 'string' },\n          uu_tien: { type: 'string', enum: ['Cao', 'Bình thường', 'Thấp'] },\n          du_an: { type: 'string' },\n        },\n      },\n    },\n  },\n};\n\nconst aiRequest = {\n  model: cfg.MO_HINH_AI,\n  max_tokens: 4000,\n  fallbacks: 'default',\n  output_config: { effort: 'low', format: { type: 'json_schema', schema } },\n  system,\n  messages: [{ role: 'user', content: userMsg }],\n};\n\nreturn out({ route: 'ai', aiRequest, nowText: `${now.ymd} ${now.hm}` });\n"
+      },
+      "id": "93279988-c4a1-4448-908a-60cff47a5ba3",
+      "name": "Đọc tin Zalo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ ({ ai: 0, sheet: 1, tra_loi: 2 })[$json.route] ?? 2 }}",
+        "options": {}
+      },
+      "id": "ebb095d5-4af5-42e7-8189-6cab702f25f9",
+      "name": "Phân loại",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "anthropic-beta",
+              "value": "server-side-fallback-2026-07-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.aiRequest) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "19feb2da-b06f-4e4d-9b35-9d40795a5d46",
+      "name": "Gọi AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Đọc kết quả AI, tạo các dòng công việc để lưu vào Google Sheet và soạn tin trả lời.\nconst tin = $('Đọc tin Zalo').first().json;\nconst res = $input.first().json || {};\nconst THU = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];\n\nconst traLoi = (reply) => [{ json: { chatId: tin.chatId, reply, coViec: false, rows: [] } }];\n\nif (res.type === 'error' || res.error) {\n  const loi = (res.error && (res.error.message || res.error.type)) || 'không rõ';\n  return traLoi(`⚠️ AI đang gặp lỗi nên chưa lưu được việc.\\nChi tiết: ${String(loi).slice(0, 300)}\\nBạn kiểm tra lại khóa AI (API key) và số dư tài khoản AI nhé.`);\n}\nif (res.stop_reason === 'refusal') {\n  return traLoi('⚠️ AI không xử lý tin nhắn này. Bạn thử viết lại ngắn gọn hơn nhé.');\n}\n\nconst block = (res.content || []).filter((b) => b.type === 'text').pop();\nlet tasks = [];\ntry {\n  tasks = JSON.parse(block ? block.text : '{}').tasks || [];\n} catch (e) {\n  return traLoi('⚠️ Mình đọc kết quả AI bị lỗi. Bạn gửi lại tin nhắn giúp mình nhé.');\n}\n\nconst isDate = (s) => /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}$/.test(s) && !isNaN(Date.parse(s.replace(' ', 'T') + ':00+07:00'));\nconst hienHan = (s) => {\n  if (!s) return 'chưa có hạn';\n  const d = new Date(Date.parse(s.replace(' ', 'T') + ':00+07:00') + 7 * 3600 * 1000);\n  return `${s.slice(11)} ${THU[d.getUTCDay()]} ${s.slice(8, 10)}/${s.slice(5, 7)}`;\n};\nconst ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';\nconst taoId = () => Array.from({ length: 4 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');\n\nconst rows = tasks\n  .filter((t) => t && String(t.viec || '').trim())\n  .slice(0, 10)\n  .map((t) => ({\n    ID: taoId(),\n    Viec: String(t.viec).trim().slice(0, 200),\n    NguoiLam: String(t.nguoi_lam || '').trim(),\n    HanChot: isDate(String(t.han_chot || '')) ? t.han_chot : '',\n    UuTien: ['Cao', 'Bình thường', 'Thấp'].includes(t.uu_tien) ? t.uu_tien : 'Bình thường',\n    DuAn: String(t.du_an || '').trim(),\n    TrangThai: 'Mới',\n    TinGoc: tin.text.slice(0, 1000),\n    NguoiGui: tin.sender,\n    ChatID: tin.chatId,\n    TaoLuc: tin.nowText,\n    XongLuc: '',\n    DaNhac: '',\n  }));\n\nif (!rows.length) {\n  return traLoi('Mình không thấy việc nào cần làm trong tin này. Nếu có, bạn viết rõ hơn (ai làm, việc gì, hạn khi nào) nhé.');\n}\n\nconst dong = rows.map((r) => {\n  const chiTiet = [r.NguoiLam && `👤 ${r.NguoiLam}`, `⏰ ${hienHan(r.HanChot)}`, r.UuTien === 'Cao' && '🔥 Gấp', r.DuAn && `📁 ${r.DuAn}`]\n    .filter(Boolean).join(' · ');\n  return `[${r.ID}] ${r.Viec}\\n${chiTiet}`;\n});\nconst reply =\n  `📝 Đã lưu ${rows.length} việc:\\n\\n${dong.join('\\n\\n')}\\n\\n` +\n  `Làm xong thì trả lời \"xong ${rows[0].ID}\". AI hiểu sai thì \"xoa ${rows[0].ID}\".`;\n\nreturn [{ json: { chatId: tin.chatId, reply: reply.slice(0, 2000), coViec: true, rows } }];\n"
+      },
+      "id": "65e9cf57-d5cc-43a5-993c-b92a66aa103e",
+      "name": "Tách công việc",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0b642751-08ac-4577-ad10-520f412bb82d",
+              "leftValue": "={{ $json.coViec }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5cf9ed41-45af-4d11-bfd3-9ff936181433",
+      "name": "Có việc?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "options": {}
+      },
+      "id": "d053bd8c-e174-407c-82f6-bc1966e84b7c",
+      "name": "Tách từng việc",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Cấu hình').first().json.LINK_GOOGLE_SHEET }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CongViec"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "cfe10491-5058-4c27-b527-cc268be228ab",
+      "name": "Lưu vào Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1380,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Tách công việc').first().json.chatId, text: $('Tách công việc').first().json.reply }) }}",
+        "options": {}
+      },
+      "id": "d514ce58-4c25-4cc3-909a-bfb4a81f74ef",
+      "name": "Báo đã lưu",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        -300
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "86020ef6-89b7-46e0-895d-980313fa2a7d",
+      "name": "Báo không có việc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Cấu hình').first().json.LINK_GOOGLE_SHEET }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CongViec"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "ChatID",
+              "lookupValue": "={{ $json.chatId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0ae6c066-fc68-4e77-8ba2-d0c25735ed7d",
+      "name": "Đọc việc của tôi",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        500,
+        0
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Xử lý lệnh \"viec\", \"xong ABCD\", \"xoa ABCD\" dựa trên các việc của người này trong Google Sheet.\nconst tin = $('Đọc tin Zalo').first().json;\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.ID);\nconst THU = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];\n\n// Đọc hạn chót: nhận \"2026-10-16 17:00\" hoặc \"16/10/2026 17:00\" (khi sửa tay trong Sheet)\nconst hanMs = (s) => {\n  s = String(s || '').trim();\n  let m = s.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})(?:[ T](\\d{1,2}):(\\d{2}))?/);\n  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 17, m[5] ? +m[5] : 0) - 7 * 3600 * 1000;\n  m = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})(?:\\s+(\\d{1,2}):(\\d{2}))?/);\n  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1], m[4] ? +m[4] : 17, m[5] ? +m[5] : 0) - 7 * 3600 * 1000;\n  return null;\n};\nconst p = (n) => String(n).padStart(2, '0');\nconst vn = (ms) => {\n  const d = new Date(ms + 7 * 3600 * 1000);\n  return { ymd: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`, hm: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`, thu: THU[d.getUTCDay()], dm: `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}` };\n};\nconst now = Date.now();\n\nif (tin.lenh === 'cap_nhat') {\n  const viec = rows.find((r) => String(r.ID).toUpperCase() === tin.taskId);\n  if (!viec) {\n    return [{ json: { canCapNhat: false, chatId: tin.chatId, reply: `Mình không tìm thấy việc ${tin.taskId} của bạn. Gõ \"viec\" để xem mã các việc đang mở.` } }];\n  }\n  const t = vn(now);\n  const reply = tin.trangThai === 'Xong'\n    ? `✅ Tuyệt! Đã đánh dấu xong: [${viec.ID}] ${viec.Viec}`\n    : `🗑 Đã xóa việc: [${viec.ID}] ${viec.Viec}`;\n  return [{ json: { canCapNhat: true, chatId: tin.chatId, reply, ID: viec.ID, TrangThai: tin.trangThai, XongLuc: `${t.ymd} ${t.hm}` } }];\n}\n\n// Lệnh \"viec\": liệt kê việc đang mở, sắp theo hạn\nconst mo = rows\n  .filter((r) => r.TrangThai === 'Mới')\n  .map((r) => ({ ...r, _han: hanMs(r.HanChot) }))\n  .sort((a, b) => (a._han ?? Infinity) - (b._han ?? Infinity));\n\nif (!mo.length) {\n  return [{ json: { canCapNhat: false, chatId: tin.chatId, reply: '🎉 Bạn không còn việc nào đang mở. Chuyển tiếp tin giao việc cho mình để thêm việc mới nhé.' } }];\n}\nconst homNay = vn(now).ymd;\nconst dong = mo.slice(0, 30).map((r) => {\n  let han = 'chưa có hạn';\n  if (r._han != null) {\n    const d = vn(r._han);\n    han = d.ymd === homNay ? `hôm nay ${d.hm}` : `${d.hm} ${d.thu} ${d.dm}`;\n    if (r._han < now) han = `⚠️ trễ hạn (${d.dm})`;\n  }\n  return `• [${r.ID}] ${r.Viec}${r.NguoiLam ? ` (${r.NguoiLam})` : ''}: ${han}${r.UuTien === 'Cao' ? ' 🔥' : ''}`;\n});\nconst them = mo.length > 30 ? `\\n…và ${mo.length - 30} việc khác.` : '';\nconst reply = `📋 Bạn có ${mo.length} việc đang mở:\\n\\n${dong.join('\\n')}${them}\\n\\nLàm xong thì trả lời \"xong\" kèm mã việc.`;\nreturn [{ json: { canCapNhat: false, chatId: tin.chatId, reply: reply.slice(0, 2000) } }];\n"
+      },
+      "id": "b2c43fb4-9287-4d85-855c-3feaec3796ac",
+      "name": "Xử lý lệnh",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1366ce1-3027-4a2e-8d3e-f17135ca13e2",
+              "leftValue": "={{ $json.canCapNhat }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "324b2bf5-f8b6-4ca2-9a2c-47bde7ebc97a",
+      "name": "Cần cập nhật?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Cấu hình').first().json.LINK_GOOGLE_SHEET }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "CongViec"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ID": "={{ $json.ID }}",
+            "TrangThai": "={{ $json.TrangThai }}",
+            "XongLuc": "={{ $json.XongLuc }}"
+          },
+          "matchingColumns": [
+            "ID"
+          ],
+          "schema": [
+            {
+              "id": "ID",
+              "displayName": "ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "TrangThai",
+              "displayName": "TrangThai",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "XongLuc",
+              "displayName": "XongLuc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "b8566da2-c394-4f4b-ac73-3af2b11acc11",
+      "name": "Cập nhật Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1160,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $('Xử lý lệnh').first().json.chatId, text: $('Xử lý lệnh').first().json.reply }) }}",
+        "options": {}
+      },
+      "id": "1a8fdfe1-d2fa-47e9-808a-42589e616152",
+      "name": "Báo đã cập nhật",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1380,
+        60
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "8a3466ca-f6b6-4033-a5bf-a236c112df44",
+      "name": "Gửi danh sách",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bot-api.zaloplatforms.com/bot{{ $('Cấu hình').first().json.BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: $json.chatId, text: $json.reply }) }}",
+        "options": {}
+      },
+      "id": "00dff6ff-e936-4ac6-ab77-fc6c9cca4af2",
+      "name": "Trả lời nhanh",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Zalo gửi tin đến": {
+      "main": [
+        [
+          {
+            "node": "Cấu hình",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cấu hình": {
+      "main": [
+        [
+          {
+            "node": "Đọc tin Zalo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc tin Zalo": {
+      "main": [
+        [
+          {
+            "node": "Phân loại",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phân loại": {
+      "main": [
+        [
+          {
+            "node": "Gọi AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Đọc việc của tôi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Trả lời nhanh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gọi AI": {
+      "main": [
+        [
+          {
+            "node": "Tách công việc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tách công việc": {
+      "main": [
+        [
+          {
+            "node": "Có việc?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Có việc?": {
+      "main": [
+        [
+          {
+            "node": "Tách từng việc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Báo không có việc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tách từng việc": {
+      "main": [
+        [
+          {
+            "node": "Lưu vào Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lưu vào Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Báo đã lưu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Đọc việc của tôi": {
+      "main": [
+        [
+          {
+            "node": "Xử lý lệnh",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Xử lý lệnh": {
+      "main": [
+        [
+          {
+            "node": "Cần cập nhật?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cần cập nhật?": {
+      "main": [
+        [
+          {
+            "node": "Cập nhật Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gửi danh sách",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cập nhật Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Báo đã cập nhật",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
