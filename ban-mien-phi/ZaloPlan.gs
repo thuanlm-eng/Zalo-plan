@@ -263,22 +263,47 @@ function menuBangTheoDoi() {
   const ui = SpreadsheetApp.getUi();
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('XEM_KEY')) props.setProperty('XEM_KEY', taoMaBiMat_());
+  const key = props.getProperty('XEM_KEY');
   let link = props.getProperty('LINK_WEB_APP') || '';
-  if (!/\/exec$/.test(link)) {
-    link = hoi_(ui, 'Link ứng dụng web', 'Dán link có được khi bấm Triển khai (dạng https://script.google.com/macros/s/.../exec)') || '';
-    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(link)) return ui.alert('Link chưa đúng', 'Link phải bắt đầu bằng https://script.google.com/ và kết thúc bằng /exec.', ui.ButtonSet.OK);
-    props.setProperty('LINK_WEB_APP', link);
+
+  // Tự kiểm tra: link có mở ra bảng theo dõi của mã mới nhất không
+  let ok = /\/exec$/.test(link) && kiemTraLinkBang_(link, key);
+  if (!ok) {
+    const moi = hoi_(ui, 'Cần cập nhật bản triển khai',
+      (link ? 'Link hiện tại đang mở ra bản mã CŨ (chưa có bảng theo dõi).\n\n' : '') +
+      'Trong Apps Script: Triển khai → Quản lý các bản triển khai → ✏️ → Phiên bản: "Phiên bản mới" → Triển khai.\n' +
+      'Rồi copy link Ứng dụng web (…/exec) dán vào đây và bấm OK.\n' +
+      (link ? 'Nếu đã cập nhật đúng bản đang dùng, cứ để trống và bấm OK để kiểm tra lại.' : ''));
+    if (moi === null) return;
+    if (moi) {
+      if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(moi)) return ui.alert('Link chưa đúng', 'Link phải bắt đầu bằng https://script.google.com/ và kết thúc bằng /exec.', ui.ButtonSet.OK);
+      link = moi;
+      props.setProperty('LINK_WEB_APP', link);
+    }
+    ok = kiemTraLinkBang_(link, key);
   }
-  const url = link + '?xem=' + props.getProperty('XEM_KEY');
+  if (!link) return;
+  const canhBao = ok ? '' : '<p style="color:#b00">⚠️ Chưa xác nhận được link này mở ra bảng theo dõi. Nếu trang chỉ hiện "ZaloPlan đang chạy", hãy cập nhật bản triển khai (Phiên bản mới, quyền Bất kỳ ai) rồi bấm lại menu này.</p>';
+  const url = link + '?xem=' + key;
   const html = HtmlService.createHtmlOutput(
     '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5">' +
     '<p><a href="' + url + '" target="_blank" style="font-size:16px;font-weight:bold">👉 Bấm vào đây để mở bảng theo dõi</a></p>' +
     '<p>Lưu link này lại (dấu trang, hoặc gửi cho chính bạn qua Zalo) để mở trên điện thoại.</p>' +
     '<p style="color:#666">Ai có link đều xem được danh sách việc. Muốn thu hồi, bấm menu <b>🔄 Đổi link bảng theo dõi</b>.</p>' +
-    '<p style="color:#666">Nếu mở ra chỉ thấy chữ "ZaloPlan đang chạy", hãy cập nhật bản triển khai: <b>Triển khai → Quản lý các bản triển khai → ✏️ → Phiên bản mới → Triển khai</b>.</p>' +
-    '<input style="width:100%;font-size:12px" readonly value="' + url + '" onclick="this.select()"></div>'
-  ).setWidth(520).setHeight(300);
+    canhBao + '<input style="width:100%;font-size:12px" readonly value="' + url + '" onclick="this.select()"></div>'
+  ).setWidth(520).setHeight(ok ? 240 : 320);
   ui.showModalDialog(html, '📊 Bảng theo dõi công việc');
+}
+
+/** Mở thử link bảng theo dõi; đúng bản mã mới thì trang có chứa dấu hiệu ZPDASH_OK. */
+function kiemTraLinkBang_(link, key) {
+  if (!link) return false;
+  try {
+    const res = UrlFetchApp.fetch(link + '?xem=' + key, { muteHttpExceptions: true, followRedirects: true });
+    return res.getContentText().indexOf('ZPDASH_OK') >= 0;
+  } catch (e) {
+    return false;
+  }
 }
 
 function menuDoiLinkBang() {
@@ -344,7 +369,7 @@ function htmlBangTheoDoi(duLieu, key) {
   const json = JSON.stringify(duLieu).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const dungChung = [pad2, vn, hanMs, nhomViec].map((f) => f.toString()).join('\n');
   return HTML_BANG
-    .replace('/*DU_LIEU*/', () => 'var DU_LIEU = ' + json + ';\nvar KEY = ' + JSON.stringify(key) + ';\nvar THU = ' + JSON.stringify(THU) + ';\n' + dungChung);
+    .replace('/*DU_LIEU*/', () => 'var ZPDASH_OK = 1;\nvar DU_LIEU = ' + json + ';\nvar KEY = ' + JSON.stringify(key) + ';\nvar THU = ' + JSON.stringify(THU) + ';\n' + dungChung);
 }
 
 const HTML_BANG = `<!doctype html>

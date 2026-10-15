@@ -13,6 +13,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
   const sent = [], zaloCalls = [], aiCalls = [], triggers = [], alerts = [], answers = [];
   const cache = new Map(), props = new Map();
   const zaloState = { webhook: '', queue: [] };
+  const webApp = {}; const dialogs = [];
   const clock = { now };
 
   const range = (r, c, nr = 1, nc = 1) => ({
@@ -41,6 +42,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
         ButtonSet: { OK: 'OK', OK_CANCEL: 'OK_CANCEL' }, Button: { OK: 'OK', CANCEL: 'CANCEL' },
         prompt: (title) => { const a = answers.shift(); return { getSelectedButton: () => (a === null ? 'CANCEL' : 'OK'), getResponseText: () => a || '', title }; },
         alert: (title, body) => alerts.push({ title, body }),
+        showModalDialog: (h, title) => dialogs.push({ title, html: h.html }),
         createMenu: (name) => { const m = { items: [], addItem: (l, f) => (m.items.push(f), m), addSeparator: () => m, addToUi: () => (ctx.__menu = { name, items: m.items }) }; return m; },
       }),
     },
@@ -56,7 +58,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
     Utilities: { base64Encode: (b) => Buffer.from(b).toString('base64'), computeDigest: (_a, s) => [...require('crypto').createHash('md5').update(s).digest()], DigestAlgorithm: { MD5: 'MD5' } },
     UrlFetchApp: {
       fetch: (url, o) => {
-        const body = JSON.parse(o.payload);
+        const body = o.payload ? JSON.parse(o.payload) : {};
         if (url.startsWith('https://bot-api.zaloplatforms.com/bot')) {
           const [token, method] = url.slice('https://bot-api.zaloplatforms.com/bot'.length).split('/');
           zaloCalls.push({ token, method, body });
@@ -70,6 +72,10 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
             return resp(200, u ? { ok: true, result: u } : { ok: false, error_code: 408, description: 'Request timeout' });
           }
           if (method === 'getWebhookInfo') return resp(200, { ok: true, result: { url: 'https://script.google.com/macros/s/AKfy/exec?key=x', updated_at: 1 } });
+        }
+        if (url.startsWith('https://script.google.com/')) {
+          const base = url.split('?')[0];
+          return { getContentText: () => (webApp[base] === 'moi' ? '<html>...var ZPDASH_OK = 1;...</html>' : 'ZaloPlan đang chạy.'), getResponseCode: () => 200 };
         }
         if (url === 'https://api.anthropic.com/v1/messages') {
           aiCalls.push({ headers: o.headers, body });
@@ -94,7 +100,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
   };
   const rows = () => grid.slice(1).map((v) => Object.fromEntries(HEAD.map((h, i) => [h, v[i] ?? ''])));
     const queue = (text, { chat = 'chat-1', id } = {}) => zaloState.queue.push({ event_name: 'message.text.received', message: { message_id: id || 'q' + ++msgId, text, chat: { id: chat }, from: { id: chat, display_name: 'Minh' } } });
-  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows, alerts, answers, zaloState, queue };
+  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows, alerts, answers, zaloState, queue, webApp, dialogs };
 }
 
 // Thursday 2026-10-15 09:30 Vietnam time
@@ -363,5 +369,31 @@ t('dashboard: doGet needs the secret view key; data is escaped', () => {
   fs.writeFileSync(path.join(__dirname, 'dashboard-preview.html'), html);
   assert.throws(() => e.ctx.layDuLieuBang('sai'), /Link không hợp lệ/);
   assert.strictEqual(e.ctx.layDuLieuBang('xemKey123').viec.length, 1);
+});
+
+t('dashboard menu: stale deployment detected, new link accepted', () => {
+  const e = makeEnv({ now: NOW });
+  const cu = 'https://script.google.com/macros/s/AKfy/exec', moi = 'https://script.google.com/macros/s/NEW/exec';
+  e.webApp[cu] = 'cu'; e.webApp[moi] = 'moi';
+  e.answers.push(moi);
+  e.ctx.menuBangTheoDoi();
+  assert.strictEqual(e.props.get('LINK_WEB_APP'), moi);
+  assert.strictEqual(e.dialogs.length, 1);
+  assert.ok(e.dialogs[0].html.includes(moi + '?xem=' + e.props.get('XEM_KEY')));
+  assert.ok(!e.dialogs[0].html.includes('Chưa xác nhận'));
+});
+t('dashboard menu: up-to-date link opens directly; failing check still gives link with warning', () => {
+  let e = makeEnv({ now: NOW });
+  e.webApp['https://script.google.com/macros/s/AKfy/exec'] = 'moi';
+  e.ctx.menuBangTheoDoi();
+  assert.strictEqual(e.answers.length, 0);
+  assert.strictEqual(e.dialogs.length, 1);
+  e = makeEnv({ now: NOW });
+  e.answers.push('');
+  e.ctx.menuBangTheoDoi();
+  assert.ok(e.dialogs[0].html.includes('Chưa xác nhận'));
+  e.answers.push(null);
+  e.ctx.menuBangTheoDoi();
+  assert.strictEqual(e.dialogs.length, 1, 'cancel shows nothing');
 });
 console.log(`\n${n} tests passed`);
