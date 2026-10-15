@@ -12,6 +12,7 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
   const grid = [header.slice()];
   const sent = [], zaloCalls = [], aiCalls = [], triggers = [], alerts = [], answers = [];
   const cache = new Map(), props = new Map();
+  const zaloState = { webhook: '', queue: [] };
   const clock = { now };
 
   const range = (r, c, nr = 1, nc = 1) => ({
@@ -61,7 +62,13 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
           zaloCalls.push({ token, method, body });
           if (method === 'sendMessage') { sent.push(body); return resp(200, { ok: true, result: { message_id: 'x' } }); }
           if (method === 'getMe') return resp(200, token === 'TOKEN123' ? { ok: true, result: { id: 'b1', account_name: 'Bot ZaloPlan' } } : { ok: false, error_code: 401 });
-          if (method === 'setWebhook') return resp(200, { ok: true, result: { url: body.url } });
+          if (method === 'setWebhook') { zaloState.webhook = body.url; return resp(200, { ok: true, result: { url: body.url } }); }
+          if (method === 'deleteWebhook') { zaloState.webhook = ''; return resp(200, { ok: true, result: { url: '' } }); }
+          if (method === 'getUpdates') {
+            if (zaloState.webhook) return resp(200, { ok: false, error_code: 409, description: 'webhook is set' });
+            const u = zaloState.queue.shift();
+            return resp(200, u ? { ok: true, result: u } : { ok: false, error_code: 408, description: 'Request timeout' });
+          }
           if (method === 'getWebhookInfo') return resp(200, { ok: true, result: { url: 'https://script.google.com/macros/s/AKfy/exec?key=x', updated_at: 1 } });
         }
         if (url === 'https://api.anthropic.com/v1/messages') {
@@ -86,7 +93,8 @@ function makeEnv({ now, header = HEAD, model = 'claude-opus-5-5', claudeKey = 's
     return sent.slice(before);
   };
   const rows = () => grid.slice(1).map((v) => Object.fromEntries(HEAD.map((h, i) => [h, v[i] ?? ''])));
-  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows, alerts, answers };
+    const queue = (text, { chat = 'chat-1', id } = {}) => zaloState.queue.push({ event_name: 'message.text.received', message: { message_id: id || 'q' + ++msgId, text, chat: { id: chat }, from: { id: chat, display_name: 'Minh' } } });
+  return { ctx, grid, sent, zaloCalls, aiCalls, triggers, props, clock, zalo, rows, alerts, answers, zaloState, queue };
 }
 
 // Thursday 2026-10-15 09:30 Vietnam time
@@ -97,28 +105,23 @@ const t = (name, fn) => { fn(); n++; console.log('ok -', name); };
 t('menu is added on open', () => {
   const e = makeEnv({ now: NOW });
   e.ctx.onOpen();
-  assert.deepStrictEqual(e.ctx.__menu, { name: '🤖 ZaloPlan', items: ['menuCaiDat', 'menuKiemTra', 'menuAiTietKiem', 'menuAiManh'] });
+  assert.deepStrictEqual(e.ctx.__menu, { name: '🤖 ZaloPlan', items: ['menuCaiDat', 'menuKiemTra', 'menuAiTietKiem', 'menuAiManh', 'menuWebhook'] });
 });
-t('menu setup: three answers, secret generated, everything connected', () => {
+t('menu setup: two answers, polling mode on, webhook removed', () => {
   const e = makeEnv({ now: NOW, configured: false });
-  e.answers.push('TOKEN123', ' sk-ant-test ', 'https://script.google.com/macros/s/AKfy/exec');
+  e.zaloState.webhook = 'https://old';
+  e.answers.push('TOKEN123', ' sk-ant-test ');
   e.ctx.menuCaiDat();
-  assert.strictEqual(e.alerts.length, 1);
   assert.strictEqual(e.alerts[0].title, '✅ Cài đặt thành công', e.alerts[0].body);
-  assert.match(e.alerts[0].body, /Xong! Mở Zalo/);
-  const secret = e.props.get('MA_BI_MAT');
-  assert.match(secret, /^[A-Za-z0-9]{32}$/);
+  assert.match(e.alerts[0].body, /hỏi Zalo có tin mới mỗi phút/);
+  assert.strictEqual(e.zaloState.webhook, '', 'webhook deleted');
   assert.strictEqual(e.props.get('KHOA_CLAUDE'), 'sk-ant-test', 'spaces trimmed');
-  const wh = e.zaloCalls.find((c) => c.method === 'setWebhook');
-  assert.strictEqual(wh.body.url, 'https://script.google.com/macros/s/AKfy/exec?key=' + secret);
-  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['moi15Phut', 15]]);
-  // running again with empty answers keeps values and the same secret, single trigger
-  e.answers.push('', '', '');
+  assert.match(e.props.get('MA_BI_MAT'), /^[A-Za-z0-9]{32}$/);
+  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['layTinMoi', 1], ['moi15Phut', 15]]);
+  e.answers.push('', '');
   e.ctx.menuCaiDat();
-  assert.strictEqual(e.props.get('MA_BI_MAT'), secret);
-  assert.strictEqual(e.triggers.length, 1);
+  assert.strictEqual(e.triggers.length, 2, 'no duplicate triggers');
   assert.strictEqual(e.alerts[1].title, '✅ Cài đặt thành công');
-  assert.strictEqual(e.zalo('hd', { key: secret }).length, 1, 'webhook accepts generated secret');
 });
 t('menu setup: cancel stops without saving', () => {
   const e = makeEnv({ now: NOW, configured: false });
@@ -127,16 +130,49 @@ t('menu setup: cancel stops without saving', () => {
   assert.strictEqual(e.alerts.length, 0);
   assert.strictEqual(e.props.get('BOT_TOKEN'), undefined);
 });
-t('menu setup: wrong token / link explained in Vietnamese', () => {
-  let e = makeEnv({ now: NOW, configured: false });
-  e.answers.push('SAI', 'sk-ant-test', 'https://script.google.com/macros/s/AKfy/exec');
+t('menu setup: wrong token explained in Vietnamese', () => {
+  const e = makeEnv({ now: NOW, configured: false });
+  e.answers.push('SAI', 'sk-ant-test');
   e.ctx.menuCaiDat();
   assert.strictEqual(e.alerts[0].title, '⚠️ Chưa xong');
   assert.match(e.alerts[0].body, /Token Zalo không đúng/);
-  e = makeEnv({ now: NOW, configured: false });
-  e.answers.push('TOKEN123', 'sk-ant-test', 'https://script.google.com/macros/s/AKfy/dev');
-  e.ctx.menuCaiDat();
-  assert.match(e.alerts[0].body, /Link ứng dụng web chưa đúng/);
+});
+t('polling: picks up queued messages, replies, saves tasks, no duplicates', () => {
+  const e = makeEnv({ now: NOW });
+  e.ctx.caiDat();
+  e.queue('hd');
+  e.queue('Lan ơi chiều thứ 6 gửi anh báo giá thép hộp Q7 nhé, gấp!', { id: 'dup' });
+  e.queue('Lan ơi chiều thứ 6 gửi anh báo giá thép hộp Q7 nhé, gấp!', { id: 'dup' });
+  e.queue('viec', { chat: 'chat-2' });
+  e.ctx.layTinMoi();
+  assert.deepStrictEqual(e.sent.map((m) => m.chat_id), ['chat-1', 'chat-1', 'chat-2']);
+  assert.match(e.sent[0].text, /mình là ZaloPlan/);
+  assert.match(e.sent[1].text, /Đã lưu 2 việc/);
+  assert.match(e.sent[2].text, /không còn việc/);
+  assert.strictEqual(e.rows().length, 2);
+  assert.match(e.props.get('lanHoiTin'), /^2026-10-15 09:30$/);
+  e.ctx.layTinMoi(); // nothing new
+  assert.strictEqual(e.sent.length, 3);
+});
+t('polling: one bad message does not block the others', () => {
+  const e = makeEnv({ now: NOW });
+  e.ctx.caiDat();
+  e.zaloState.queue.push({ event_name: 'message.text.received', message: { message_id: 'bad', text: 'hd', chat: {} } });
+  e.queue('hd');
+  e.ctx.layTinMoi();
+  assert.strictEqual(e.sent.length, 1);
+});
+t('webhook mode from menu (advanced)', () => {
+  const e = makeEnv({ now: NOW });
+  e.ctx.caiDat();
+  e.answers.push('https://script.google.com/macros/s/AKfy/exec');
+  e.ctx.menuWebhook();
+  assert.strictEqual(e.alerts[0].title, '✅ Cài đặt thành công');
+  assert.strictEqual(e.zaloState.webhook, 'https://script.google.com/macros/s/AKfy/exec?key=BiMat1234567890ab');
+  assert.deepStrictEqual(e.triggers.map((x) => x.fn), ['moi15Phut']);
+  e.answers.push('https://script.google.com/macros/s/AKfy/dev');
+  e.ctx.menuWebhook();
+  assert.match(e.alerts[1].body, /phải kết thúc bằng \/exec/);
 });
 t('model switch from menu takes effect immediately', () => {
   const e = makeEnv({ now: NOW });
@@ -152,22 +188,20 @@ t('status check from menu', () => {
   e.ctx.menuKiemTra();
   assert.match(e.alerts[0].body, /Token Zalo: đã có/);
   assert.match(e.alerts[0].body, /Bot Zalo: hoạt động \(Bot ZaloPlan\)/);
-  assert.match(e.alerts[0].body, /Lịch chạy mỗi 15 phút: CHƯA BẬT/);
+  assert.match(e.alerts[0].body, /Lịch hỏi tin mỗi phút: CHƯA BẬT/);
+  assert.match(e.alerts[0].body, /Cách nhận tin: hỏi Zalo mỗi phút/);
 });
 t('unconfigured bot ignores webhook calls', () => {
   const e = makeEnv({ now: NOW, configured: false });
   assert.strictEqual(e.zalo('hd', { key: '' }).length, 0);
 });
-t('caiDat creates trigger, checks token, sets webhook with key, tests Claude', () => {
+t('caiDat checks token and Claude, deletes webhook, sets both schedules', () => {
   const e = makeEnv({ now: NOW });
   e.ctx.caiDat();
-  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['moi15Phut', 15]]);
-  const wh = e.zaloCalls.find((c) => c.method === 'setWebhook');
-  assert.strictEqual(wh.body.url, 'https://script.google.com/macros/s/AKfy/exec?key=BiMat1234567890ab');
-  assert.strictEqual(wh.body.secret_token, 'BiMat1234567890ab');
+  assert.deepStrictEqual(e.triggers.map((x) => [x.fn, x.m]), [['layTinMoi', 1], ['moi15Phut', 15]]);
+  assert.ok(e.zaloCalls.some((c) => c.method === 'deleteWebhook'));
+  assert.ok(e.zaloCalls.some((c) => c.method === 'getMe'));
   assert.strictEqual(e.aiCalls.length, 1);
-  e.ctx.caiDat(); // running twice keeps a single trigger
-  assert.strictEqual(e.triggers.length, 1);
 });
 t('caiDat reports a bad Claude key', () => {
   const e = makeEnv({ now: NOW, claudeKey: 'sk-ant-wrong' });
